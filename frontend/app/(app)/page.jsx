@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { getHistory } from '../lib/migrationStore.js'
+'use client'
 
-export default function Dashboard() {
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { getHistory } from '../../lib/migrationStore'
+
+export default function DashboardPage() {
   const [history, setHistory] = useState([])
 
   useEffect(() => {
@@ -10,7 +12,7 @@ export default function Dashboard() {
   }, [])
 
   const totalMigrations = history.length
-  const totalRecords = history.reduce((sum, h) => sum + h.recordCount, 0)
+  const totalRecords = history.reduce((sum, h) => sum + h.totalRecords, 0)
   const last = history[0]
 
   return (
@@ -19,9 +21,9 @@ export default function Dashboard() {
         <div>
           <span className="eyebrow">DASHBOARD</span>
           <h1>IFS data migration</h1>
-          <p>Fetch a column of source data, review it, then migrate it into IFS.</p>
+          <p>Configure environments, fetch entity data for review, then migrate it into IFS.</p>
         </div>
-        <Link to="/new-migration" className="button">Start new migration</Link>
+        <Link href="/new-migration" className="button">Start new migration</Link>
       </header>
 
       <div className="banner">
@@ -62,9 +64,11 @@ export default function Dashboard() {
             {history.map((h) => (
               <div className="history-row" key={h.id}>
                 <div>
-                  <h3 style={{ margin: 0, textTransform: 'uppercase', fontSize: 13, letterSpacing: '.04em' }}>{h.column}</h3>
+                  <h3 style={{ margin: 0, fontSize: 14 }}>{h.fromEnv} → {h.toEnv}</h3>
                   <div className="history-meta">
-                    <span>{h.recordCount} records</span>
+                    {h.entities.map((e) => (
+                      <span key={e.id}>{e.label}: {e.total}</span>
+                    ))}
                     <span>{new Date(h.completedAt).toLocaleString()}</span>
                   </div>
                 </div>

@@ -15,6 +15,7 @@ export function logout() {
 }
 
 export function getSession() {
+  if (typeof window === 'undefined') return null
   const raw = sessionStorage.getItem(SESSION_KEY)
   return raw ? JSON.parse(raw) : null
 }

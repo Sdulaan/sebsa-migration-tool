@@ -1,9 +1,11 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { login } from '../lib/auth.js'
+'use client'
 
-export default function Login() {
-  const navigate = useNavigate()
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { login } from '../../lib/auth'
+
+export default function LoginPage() {
+  const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -16,7 +18,7 @@ export default function Login() {
     setTimeout(() => {
       const ok = login(email, password)
       setSubmitting(false)
-      if (ok) navigate('/', { replace: true })
+      if (ok) router.replace('/')
       else setError('Incorrect email or password.')
     }, 350)
   }

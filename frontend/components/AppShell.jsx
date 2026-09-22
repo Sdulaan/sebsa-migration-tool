@@ -1,13 +1,22 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { getSession, logout } from '../lib/auth.js'
+'use client'
 
-export default function Layout() {
-  const navigate = useNavigate()
-  const session = getSession()
+import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { getSession, logout } from '../lib/auth'
+
+export default function AppShell({ children }) {
+  const pathname = usePathname()
+  const router = useRouter()
+  const [session, setSession] = useState(null)
+
+  useEffect(() => {
+    setSession(getSession())
+  }, [])
 
   function handleLogout() {
     logout()
-    navigate('/login', { replace: true })
+    router.replace('/login')
   }
 
   return (
@@ -17,8 +26,8 @@ export default function Layout() {
           <img src="/sebsa-logo.png" alt="SEBSA" className="brand-logo" />
         </div>
         <nav>
-          <NavLink to="/" end>Dashboard</NavLink>
-          <NavLink to="/new-migration">New Migration</NavLink>
+          <Link href="/" className={pathname === '/' ? 'active' : ''}>Dashboard</Link>
+          <Link href="/new-migration" className={pathname === '/new-migration' ? 'active' : ''}>New Migration</Link>
         </nav>
         <div className="notice">
           <div className="notice-text">
@@ -33,7 +42,7 @@ export default function Layout() {
           )}
         </div>
       </aside>
-      <main><Outlet /></main>
+      <main>{children}</main>
     </div>
   )
 }
