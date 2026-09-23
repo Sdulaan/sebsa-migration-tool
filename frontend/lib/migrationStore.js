@@ -7,8 +7,7 @@ function mockCustomerRecord(i) {
   return {
     code: `CUST-${String(1000 + i)}`,
     name: `Customer ${1000 + i}`,
-    region: regions[i % regions.length],
-    status: i % 11 === 0 ? 'Needs review' : 'Ready'
+    region: regions[i % regions.length]
   }
 }
 
@@ -17,8 +16,7 @@ function mockCompanyRecord(i) {
   return {
     code: `COMP-${String(100 + i)}`,
     name: `Company ${100 + i}`,
-    country: countries[i % countries.length],
-    status: i % 11 === 0 ? 'Needs review' : 'Ready'
+    country: countries[i % countries.length]
   }
 }
 
@@ -29,8 +27,7 @@ function mockInventoryRecord(i) {
     sku: `INV-${String(1000 + i)}`,
     description: `Inventory Item ${1000 + i}`,
     warehouse: warehouses[i % warehouses.length],
-    uom: uoms[i % uoms.length],
-    status: i % 11 === 0 ? 'Needs review' : 'Ready'
+    uom: uoms[i % uoms.length]
   }
 }
 
@@ -39,8 +36,7 @@ function mockSupplierRecord(i) {
   return {
     code: `SUP-${String(1000 + i)}`,
     name: `Supplier ${1000 + i}`,
-    category: categories[i % categories.length],
-    status: i % 11 === 0 ? 'Needs review' : 'Ready'
+    category: categories[i % categories.length]
   }
 }
 
@@ -52,12 +48,9 @@ export const AVAILABLE_ENTITIES = [
     enabled: true,
     defaultCount: 58,
     idKey: 'code',
-    columns: [
-      { key: 'code', label: 'Customer Code' },
-      { key: 'name', label: 'Name' },
-      { key: 'region', label: 'Region' },
-      { key: 'status', label: 'Status' }
-    ],
+    rowPrimary: 'name',
+    rowSecondary: ['code', 'region'],
+    subMenu: ['Address', 'Contact', 'Communication Method'],
     generator: mockCustomerRecord
   },
   {
@@ -67,12 +60,8 @@ export const AVAILABLE_ENTITIES = [
     enabled: true,
     defaultCount: 12,
     idKey: 'code',
-    columns: [
-      { key: 'code', label: 'Company Code' },
-      { key: 'name', label: 'Name' },
-      { key: 'country', label: 'Country' },
-      { key: 'status', label: 'Status' }
-    ],
+    rowPrimary: 'name',
+    rowSecondary: ['code', 'country'],
     generator: mockCompanyRecord
   },
   {
@@ -82,13 +71,8 @@ export const AVAILABLE_ENTITIES = [
     enabled: true,
     defaultCount: 42,
     idKey: 'sku',
-    columns: [
-      { key: 'sku', label: 'SKU' },
-      { key: 'description', label: 'Description' },
-      { key: 'warehouse', label: 'Warehouse' },
-      { key: 'uom', label: 'UoM' },
-      { key: 'status', label: 'Status' }
-    ],
+    rowPrimary: 'description',
+    rowSecondary: ['sku', 'warehouse', 'uom'],
     generator: mockInventoryRecord
   },
   {
@@ -98,12 +82,8 @@ export const AVAILABLE_ENTITIES = [
     enabled: true,
     defaultCount: 27,
     idKey: 'code',
-    columns: [
-      { key: 'code', label: 'Supplier Code' },
-      { key: 'name', label: 'Name' },
-      { key: 'category', label: 'Category' },
-      { key: 'status', label: 'Status' }
-    ],
+    rowPrimary: 'name',
+    rowSecondary: ['code', 'category'],
     generator: mockSupplierRecord
   }
 ]
@@ -116,8 +96,7 @@ export function fetchEntitiesData(entityIds) {
         const entity = AVAILABLE_ENTITIES.find((e) => e.id === entityId)
         if (!entity) return
         const records = Array.from({ length: entity.defaultCount }, (_, i) => entity.generator(i))
-        const flagged = records.filter((r) => r.status === 'Needs review').length
-        result[entityId] = { records, total: records.length, flagged }
+        result[entityId] = { records, total: records.length }
       })
       resolve(result)
     }, 900)
