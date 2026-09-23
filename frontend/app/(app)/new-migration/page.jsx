@@ -1,13 +1,32 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Dialog from '@mui/material/Dialog'
+import DialogTitle from '@mui/material/DialogTitle'
+import DialogContent from '@mui/material/DialogContent'
+import DialogActions from '@mui/material/DialogActions'
 import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined'
 import ApartmentOutlinedIcon from '@mui/icons-material/ApartmentOutlined'
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined'
 import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { AVAILABLE_ENTITIES, ENVIRONMENTS, fetchEntitiesData, runMigration } from '../../../lib/migrationStore'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
+import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined'
+import {
+  AVAILABLE_ENTITIES,
+  ENVIRONMENTS,
+  GRANT_TYPES,
+  DEFAULT_ENV_CONFIG,
+  fetchEntitiesData,
+  runMigration,
+  getEnvironmentConfigs,
+  getEnvironmentConfig,
+  saveEnvironmentConfig,
+  testEnvironmentConnection,
+  getSessionToken
+} from '../../../lib/migrationStore'
 import MigrationStepper from '../../../components/MigrationStepper'
 
 const STEPS = ['Configuration', 'Review Data', 'Migrate']
@@ -24,6 +43,13 @@ export default function NewMigrationPage() {
   const [step, setStep] = useState(0)
   const [fromEnv, setFromEnv] = useState('')
   const [toEnv, setToEnv] = useState('')
+  const [fromEnvModalOpen, setFromEnvModalOpen] = useState(false)
+  const [envConfigs, setEnvConfigs] = useState({})
+  const [modalEnv, setModalEnv] = useState('')
+  const [authForm, setAuthForm] = useState(DEFAULT_ENV_CONFIG)
+  const [testStatus, setTestStatus] = useState('idle') // idle | testing | success | error
+  const [testMessage, setTestMessage] = useState('')
+  const [sessionTokenInfo, setSessionTokenInfo] = useState(null)
   const [selectedEntities, setSelectedEntities] = useState([])
   const [loading, setLoading] = useState(false)
   const [dataMap, setDataMap] = useState(null)
@@ -36,8 +62,70 @@ export default function NewMigrationPage() {
   const sameEnv = fromEnv && toEnv && fromEnv === toEnv
   const canFetch = fromEnv && toEnv && !sameEnv && selectedEntities.length > 0 && !loading
 
+  const fromConfig = fromEnv ? envConfigs[fromEnv] : null
+  const fromEnvStatus = !fromEnv
+    ? 'base'
+    : sameEnv
+    ? 'error'
+    : fromConfig?.status === 'authorized'
+    ? 'success'
+    : fromConfig?.status === 'error'
+    ? 'error'
+    : 'base'
+
+  useEffect(() => {
+    setEnvConfigs(getEnvironmentConfigs())
+  }, [])
+
   function toggleEntity(id) {
     setSelectedEntities((prev) => (prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]))
+  }
+
+  function loadEnvIntoForm(env) {
+    const config = getEnvironmentConfig(env)
+    setModalEnv(env)
+    setAuthForm(config)
+    setTestStatus(config.status === 'authorized' ? 'success' : config.status === 'error' ? 'error' : 'idle')
+    setTestMessage(config.status === 'error' ? config.lastError || '' : '')
+    setSessionTokenInfo(getSessionToken(env))
+  }
+
+  function openFromEnvModal() {
+    loadEnvIntoForm(fromEnv || ENVIRONMENTS[0])
+    setFromEnvModalOpen(true)
+  }
+
+  function updateAuthField(field, value) {
+    setAuthForm((prev) => ({ ...prev, [field]: value }))
+    setTestStatus('idle')
+    setTestMessage('')
+  }
+
+  async function handleTestConnection() {
+    setTestStatus('testing')
+    const result = await testEnvironmentConnection(modalEnv, authForm)
+    if (result.success) {
+      setTestStatus('success')
+      setTestMessage(result.tokenPreview)
+      setSessionTokenInfo(getSessionToken(modalEnv))
+    } else {
+      setTestStatus('error')
+      setTestMessage(result.error)
+      setSessionTokenInfo(null)
+    }
+  }
+
+  function handleSaveEnvConfig() {
+    const status = testStatus === 'success' ? 'authorized' : testStatus === 'error' ? 'error' : 'unconfigured'
+    const saved = saveEnvironmentConfig(modalEnv, {
+      ...authForm,
+      status,
+      lastError: testStatus === 'error' ? testMessage : null,
+      lastTestedAt: testStatus === 'success' || testStatus === 'error' ? new Date().toISOString() : null
+    })
+    setEnvConfigs((prev) => ({ ...prev, [modalEnv]: saved }))
+    setFromEnv(modalEnv)
+    if (modalEnv !== toEnv) setFromEnvModalOpen(false)
   }
 
   async function handleFetch() {
@@ -148,12 +236,15 @@ export default function NewMigrationPage() {
           <div className="env-row">
             <label>
               From environment
-              <select value={fromEnv} onChange={(e) => setFromEnv(e.target.value)}>
-                <option value="">Select environment</option>
-                {ENVIRONMENTS.map((env) => (
-                  <option key={env} value={env}>{env}</option>
-                ))}
-              </select>
+              <button
+                type="button"
+                className={`env-select-btn env-status-${fromEnvStatus}`}
+                onClick={openFromEnvModal}
+              >
+                {fromEnvStatus === 'success' && <CheckCircleOutlineIcon fontSize="small" />}
+                {fromEnvStatus === 'error' && <ErrorOutlineIcon fontSize="small" />}
+                <span>{fromEnv || 'Select environment'}</span>
+              </button>
             </label>
             <span className="env-arrow">→</span>
             <label>
@@ -167,6 +258,124 @@ export default function NewMigrationPage() {
             </label>
           </div>
           {sameEnv && <div className="error">Source and destination environments must be different.</div>}
+
+          <Dialog open={fromEnvModalOpen} onClose={() => setFromEnvModalOpen(false)} fullWidth maxWidth="sm">
+            <DialogTitle>Configure source environment (IFS API)</DialogTitle>
+            <DialogContent>
+              <p className="login-sub" style={{ marginTop: -4 }}>
+                These settings define how the tool authorizes against the IFS Cloud REST API for this
+                environment before issuing GET requests to fetch entities.
+              </p>
+
+              {modalEnv === toEnv && (
+                <div className="error" style={{ marginTop: 10 }}>
+                  {modalEnv} is already selected as the destination environment.
+                </div>
+              )}
+
+              <div className="env-form">
+                <label>
+                  Base URL
+                  <input
+                    type="text"
+                    placeholder="https://ifscloud.yourorganization.com"
+                    value={authForm.baseUrl}
+                    onChange={(e) => updateAuthField('baseUrl', e.target.value)}
+                  />
+                </label>
+
+                <label>
+                  Authorization path
+                  <input
+                    type="text"
+                    placeholder="/auth/realms/ifs/protocol/openid-connect/token"
+                    value={authForm.authPath}
+                    onChange={(e) => updateAuthField('authPath', e.target.value)}
+                  />
+                  <small className="field-hint">OAuth2 token endpoint used to authorize before calling IFS GET methods.</small>
+                </label>
+
+                <label>
+                  Grant type
+                  <select value={authForm.grantType} onChange={(e) => updateAuthField('grantType', e.target.value)}>
+                    {GRANT_TYPES.map((g) => (
+                      <option key={g.value} value={g.value}>{g.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="env-form-pair">
+                  <label>
+                    Client ID
+                    <input
+                      type="text"
+                      placeholder="sebsa-migration-tool"
+                      value={authForm.clientId}
+                      onChange={(e) => updateAuthField('clientId', e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Client secret
+                    <input
+                      type="password"
+                      placeholder="••••••••"
+                      value={authForm.clientSecret}
+                      onChange={(e) => updateAuthField('clientSecret', e.target.value)}
+                    />
+                  </label>
+                </div>
+
+                {authForm.grantType === 'password' && (
+                  <div className="env-form-pair">
+                    <label>
+                      Username
+                      <input
+                        type="text"
+                        value={authForm.username}
+                        onChange={(e) => updateAuthField('username', e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Password
+                      <input
+                        type="password"
+                        value={authForm.password}
+                        onChange={(e) => updateAuthField('password', e.target.value)}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              {testStatus === 'success' && (
+                <div className="auth-banner success">
+                  <CheckCircleOutlineIcon fontSize="small" />
+                  <span>Authorized successfully. {testMessage}</span>
+                </div>
+              )}
+              {testStatus === 'error' && (
+                <div className="auth-banner error">
+                  <ErrorOutlineIcon fontSize="small" />
+                  <span>{testMessage}</span>
+                </div>
+              )}
+              {sessionTokenInfo && (
+                <p className="field-hint" style={{ marginTop: 10 }}>
+                  Session token cached for {modalEnv} — expires {new Date(sessionTokenInfo.expiresAt).toLocaleTimeString()}.
+                  It will be reused (no re-authorization) until then.
+                </p>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <button type="button" className="ghost" onClick={() => setFromEnvModalOpen(false)}>Cancel</button>
+              <button type="button" className="secondary" onClick={handleTestConnection} disabled={testStatus === 'testing'}>
+                {testStatus === 'testing' ? 'Authorizing…' : 'Test connection'}
+              </button>
+              <button type="button" onClick={handleSaveEnvConfig}>
+                Save &amp; use environment
+              </button>
+            </DialogActions>
+          </Dialog>
 
           <h2 style={{ marginTop: 26 }}>Entities to migrate</h2>
           <p className="login-sub" style={{ marginTop: -6 }}>Select one or more entities to fetch for review.</p>
@@ -191,6 +400,15 @@ export default function NewMigrationPage() {
           </div>
 
           <div className="actions">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => router.push(`/new-migration/sales-part-set?env=${encodeURIComponent(fromEnv)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (SalesPartSet)
+            </button>
             <button onClick={handleFetch} disabled={!canFetch}>
               {loading ? 'Fetching…' : 'Fetch selected data'}
             </button>
