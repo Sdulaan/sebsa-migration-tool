@@ -27,8 +27,8 @@ export default function LoginPage() {
     <div className="login-page">
       <div className="login-card">
         <img src="/sebsa-logo.png" alt="SEBSA" className="login-logo" />
-        <h1>IFS Data Migration</h1>
-        <p className="login-sub">Sign in to prepare and migrate master data.</p>
+        <h1>IFS Data Transfer</h1>
+        <p className="login-sub">Sign in to prepare and transfer master data.</p>
 
         <form className="form" onSubmit={handleSubmit}>
           <label>

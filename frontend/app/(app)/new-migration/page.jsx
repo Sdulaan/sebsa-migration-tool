@@ -411,8 +411,8 @@ export default function NewMigrationPage() {
     <>
       <header>
         <div>
-          <span className="eyebrow">NEW MIGRATION</span>
-          <h1>Migrate data to IFS</h1>
+          <span className="eyebrow">NEW TRANSFER</span>
+          <h1>Transfer data to IFS</h1>
           <p>Configure the environments, transfer mandatory and basic data, then confirm the transfer.</p>
         </div>
       </header>
@@ -421,7 +421,7 @@ export default function NewMigrationPage() {
 
       {step === 0 && (
         <div className="panel">
-          <h2>Configure Migration</h2>
+          <h2>Configure Transfer</h2>
           <p className="login-sub" style={{ marginTop: -6 }}>Select the source and destination environments.</p>
 
           <div className="env-row">
@@ -516,7 +516,7 @@ export default function NewMigrationPage() {
                     Client ID
                     <input
                       type="text"
-                      placeholder="sebsa-migration-tool"
+                      placeholder="sebsa-transfer-tool"
                       value={authForm.clientId}
                       onChange={(e) => updateAuthField('clientId', e.target.value)}
                     />

@@ -72,7 +72,7 @@ function SalesPartSetContent() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `sales-part-migration-${env}-${Date.now()}.json`
+    link.download = `sales-part-transfer-${env}-${Date.now()}.json`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -102,7 +102,7 @@ function SalesPartSetContent() {
         <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0, marginBottom: 18 }}>
           <button type="button" className="ghost" onClick={() => router.push('/new-migration')}>
             <ArrowBackOutlinedIcon fontSize="small" />
-            Back to migration
+            Back to transfer
           </button>
           <button type="button" className="secondary" onClick={load} disabled={loading}>
             <RefreshIcon fontSize="small" />
@@ -180,7 +180,7 @@ function SalesPartSetContent() {
           <div className="actions">
             <button type="button" onClick={handleMigrateData} disabled={selectedIndices.size === 0}>
               <CloudUploadOutlinedIcon fontSize="small" />
-              Migrate data ({selectedIndices.size} selected)
+              Transfer data ({selectedIndices.size} selected)
             </button>
           </div>
         )}

@@ -16,7 +16,7 @@ export default function DashboardPage() {
     setHistory(getHistory())
   }, [])
 
-  const totalMigrations = history.length
+  const totalTransfers = history.length
   const totalRecords = history.reduce((sum, h) => sum + h.totalRecords, 0)
   const last = history[0]
 
@@ -25,8 +25,8 @@ export default function DashboardPage() {
       <header style={{ marginBottom: '24px' }}>
         <div>
           <span className="eyebrow">DASHBOARD</span>
-          <h1>IFS Data Migration</h1>
-          <p>Monitor your migration environments and initiate new data transfers.</p>
+          <h1>IFS Data Transfer</h1>
+          <p>Monitor your transfer environments and initiate new data transfers.</p>
         </div>
       </header>
 
@@ -44,13 +44,13 @@ export default function DashboardPage() {
         boxShadow: '0 10px 30px rgba(76, 29, 140, 0.15)'
       }}>
         <div style={{ maxWidth: '500px' }}>
-          <h2 style={{ color: '#fff', fontSize: '24px', marginBottom: '8px' }}>Ready to migrate data?</h2>
+          <h2 style={{ color: '#fff', fontSize: '24px', marginBottom: '8px' }}>Ready to transfer data?</h2>
           <p style={{ margin: 0, color: 'rgba(255,255,255,0.85)', fontSize: '15px', lineHeight: 1.5 }}>
-            Configure source and destination environments, fetch candidate data for review, and safely migrate master entities into IFS.
+            Configure source and destination environments, fetch candidate data for review, and safely transfer master entities into IFS.
           </p>
         </div>
         <Link href="/new-migration" className="button" style={{ background: '#fff', color: 'var(--accent-strong)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-          Start new migration
+          Start new transfer
         </Link>
       </div>
 
@@ -65,10 +65,10 @@ export default function DashboardPage() {
         
         <article style={{ display: 'flex', flexDirection: 'column', padding: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <label>MIGRATIONS</label>
+            <label>TRANSFERS</label>
             <SyncAltIcon style={{ color: 'var(--accent)', background: 'var(--accent-soft)', borderRadius: '50%', padding: '4px', fontSize: '28px' }} />
           </div>
-          <strong style={{ marginTop: 'auto', paddingTop: '16px' }}>{totalMigrations}</strong>
+          <strong style={{ marginTop: 'auto', paddingTop: '16px' }}>{totalTransfers}</strong>
         </article>
 
         <article style={{ display: 'flex', flexDirection: 'column', padding: '24px' }}>
@@ -94,14 +94,14 @@ export default function DashboardPage() {
         <div className="section-heading" style={{ padding: '24px 24px 16px', margin: 0, borderBottom: '1px solid var(--border-soft)' }}>
           <div>
             <span className="eyebrow">ACTIVITY</span>
-            <h2 style={{ margin: '4px 0 0' }}>Recent Migrations</h2>
+            <h2 style={{ margin: '4px 0 0' }}>Recent Transfers</h2>
           </div>
           <Link href="/history" className="ghost link-btn" style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '13px' }}>View all history</Link>
         </div>
 
         {history.length === 0 ? (
           <div className="empty" style={{ padding: '60px 20px', background: 'var(--surface)', borderRadius: '0 0 12px 12px' }}>
-            No migrations yet. Start your first one above.
+            No transfers yet. Start your first one above.
           </div>
         ) : (
           <div className="history-list" style={{ padding: '0 24px' }}>
