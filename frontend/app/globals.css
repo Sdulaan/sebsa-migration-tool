@@ -30,6 +30,7 @@ button:disabled{cursor:not-allowed;opacity:.55;box-shadow:none}
 button:focus-visible,.button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid var(--grad-start);outline-offset:3px}
 .secondary{background:var(--accent-soft)!important;color:var(--accent-strong)!important;box-shadow:none!important;border:1px solid var(--accent-soft-border)!important}
 .ghost{background:#F3F4F8!important;color:#4B5265!important;box-shadow:none!important}
+.solid{background:var(--accent)}
 .link-btn{padding:6px 0!important;background:none!important;font-size:12px;font-weight:700}
 
 .shell{min-height:100vh;display:grid;grid-template-columns:255px 1fr}

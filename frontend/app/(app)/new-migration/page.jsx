@@ -13,7 +13,6 @@ import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
-import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined'
 import {
   AVAILABLE_ENTITIES,
   ENVIRONMENTS,
@@ -25,11 +24,17 @@ import {
   getEnvironmentConfig,
   saveEnvironmentConfig,
   testEnvironmentConnection,
+  suggestAuthPath,
   getSessionToken
 } from '../../../lib/migrationStore'
 import MigrationStepper from '../../../components/MigrationStepper'
 
 const STEPS = ['Configuration', 'Review Data', 'Migrate']
+
+// Settings are stored per environment name, so source and destination must
+// start on different names — otherwise the destination popup loads (and
+// saving it overwrites) the source's settings.
+const DEFAULT_ENV = { from: ENVIRONMENTS[0], to: ENVIRONMENTS[1] }
 
 const ENTITY_ICONS = {
   customer: PersonOutlineOutlinedIcon,
@@ -97,12 +102,20 @@ export default function NewMigrationPage() {
   function openEnvModal(target) {
     const current = target === 'from' ? fromEnv : toEnv
     setModalTarget(target)
-    loadEnvIntoForm(current || ENVIRONMENTS[0])
+    loadEnvIntoForm(current || DEFAULT_ENV[target])
     setEnvModalOpen(true)
   }
 
   function updateAuthField(field, value) {
-    setAuthForm((prev) => ({ ...prev, [field]: value }))
+    setAuthForm((prev) => {
+      const next = { ...prev, [field]: value }
+      // The authorization path follows the Base URL until the user edits it
+      // themselves (a hand-typed path is never overwritten).
+      if (field === 'baseUrl' && (!prev.authPath || prev.authPath === suggestAuthPath(prev.baseUrl))) {
+        next.authPath = suggestAuthPath(value)
+      }
+      return next
+    })
     setTestStatus('idle')
     setTestMessage('')
   }
@@ -298,11 +311,13 @@ export default function NewMigrationPage() {
                   Authorization path
                   <input
                     type="text"
-                    placeholder="/auth/realms/ifs/protocol/openid-connect/token"
+                    placeholder="{Base URL}/auth/realms/{YourNamespace}/protocol/openid-connect/token"
                     value={authForm.authPath}
                     onChange={(e) => updateAuthField('authPath', e.target.value)}
                   />
-                  <small className="field-hint">OAuth2 token endpoint used to authorize before calling IFS GET methods.</small>
+                  <small className="field-hint">
+                    {'Filled in from the Base URL — replace {YourNamespace} with your own namespace, which you can find in Solution Manager > Setup > System Parameters > parameter "Namespace".'}
+                  </small>
                 </label>
 
                 <label>
@@ -381,45 +396,16 @@ export default function NewMigrationPage() {
               <button type="button" className="secondary" onClick={handleTestConnection} disabled={testStatus === 'testing'}>
                 {testStatus === 'testing' ? 'Authorizing…' : 'Test connection'}
               </button>
-              <button type="button" onClick={handleSaveEnvConfig}>
+              <button type="button" className="solid" onClick={handleSaveEnvConfig}>
                 Save &amp; use environment
               </button>
             </DialogActions>
           </Dialog>
 
-          <h2 style={{ marginTop: 26 }}>Entities to migrate</h2>
-          <p className="login-sub" style={{ marginTop: -6 }}>Select one or more entities to fetch for review.</p>
-
-          <div className="column-grid">
-            {AVAILABLE_ENTITIES.map((ent) => {
-              const isSelected = selectedEntities.includes(ent.id)
-              return (
-                <button
-                  type="button"
-                  key={ent.id}
-                  className={`column-card ${isSelected ? 'selected' : ''}`}
-                  style={{ position: 'relative' }}
-                  onClick={() => toggleEntity(ent.id)}
-                >
-                  {isSelected && <span className="entity-check">✓</span>}
-                  <span className="column-card-label">{ent.label}</span>
-                  <small>{ent.description}</small>
-                </button>
-              )
-            })}
-          </div>
-
           <div className="actions">
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => router.push(`/new-migration/sales-part-set?env=${encodeURIComponent(fromEnv)}`)}
-              disabled={!fromEnv}
+            <button className="solid" onClick={handleFetch} 
+            disabled={!canFetch}
             >
-              <CloudDownloadOutlinedIcon fontSize="small" />
-              Get live data (SalesPartSet)
-            </button>
-            <button onClick={handleFetch} disabled={!canFetch}>
               {loading ? 'Fetching…' : 'Fetch selected data'}
             </button>
           </div>

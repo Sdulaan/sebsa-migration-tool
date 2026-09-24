@@ -12,6 +12,19 @@ export const GRANT_TYPES = [
   { value: 'password', label: 'Password (resource owner)' }
 ]
 
+// The IFS Cloud Keycloak realm is the tenant's Namespace system parameter,
+// which can't be derived from the host — so the suggested path leaves a
+// {YourNamespace} placeholder for the user to replace by hand.
+export function suggestAuthPath(baseUrl) {
+  try {
+    const { origin, hostname } = new URL(baseUrl.trim())
+    if (!hostname.includes('.')) return ''
+    return `${origin}/auth/realms/{YourNamespace}/protocol/openid-connect/token`
+  } catch {
+    return ''
+  }
+}
+
 export const DEFAULT_ENV_CONFIG = {
   baseUrl: '',
   authPath: '',
@@ -103,19 +116,41 @@ export async function testEnvironmentConnection(env, config) {
   }
 }
 
-// This one is a real integration point: a live IFS Cloud projection. Built
-// from the environment's own configured Base URL, not a fixed host, so it
+const IFS_PROJECTION_PATH = '/main/ifsapplications/projection/v1'
+
+// Live IFS Cloud projections the tool can browse. Each endpoint is appended
+// to the environment's own configured Base URL, not a fixed host, so it
 // follows whichever IFS tenant the source environment modal was set up for.
-export function buildSalesPartSetUrl(baseUrl) {
+// Each dataset's `buildPayload` shapes selected records for export.
+export const LIVE_DATASETS = {
+  salesPart: {
+    title: 'SalesPartSet',
+    endpoint: `${IFS_PROJECTION_PATH}/SalesPartHandling.svc/SalesPartSet`,
+    apiRoute: '/api/ifs/sales-part-set',
+    pageRoute: '/new-migration/sales-part-set',
+    exportPrefix: 'sales-part-migration',
+    buildPayload: buildSalesPartMigrationPayload
+  },
+  personGroup: {
+    title: 'DocumentGroupSet',
+    endpoint: `${IFS_PROJECTION_PATH}/PersonGroupHandling.svc/DocumentGroupSet`,
+    apiRoute: '/api/ifs/person-group-set',
+    pageRoute: '/new-migration/person-group-set',
+    exportPrefix: 'person-group-migration',
+    buildPayload: buildPersonGroupMigrationPayload
+  }
+}
+
+export function buildLiveDataUrl(baseUrl, dataset) {
   if (!baseUrl) throw new Error('Base URL is required.')
-  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/SalesPartHandling.svc/SalesPartSet`
+  return `${baseUrl.replace(/\/+$/, '')}${dataset.endpoint}`
 }
 
 // Calls our own /api route (server-side) so the OAuth2 client secret never
 // reaches the browser bundle and the request isn't blocked by CORS. Reuses
 // the session token from a prior "Test connection" when one is still valid,
 // otherwise the route mints a fresh one from the saved config.
-export async function fetchLiveSalesParts(env, config) {
+export async function fetchLiveData(dataset, env, config) {
   const cached = env ? getSessionToken(env) : null
   if (!cached && !config) {
     return { success: false, error: 'Select and authorize a source environment first.' }
@@ -124,7 +159,7 @@ export async function fetchLiveSalesParts(env, config) {
     return { success: false, error: 'This environment has no Base URL configured — set one in "Configure source environment".' }
   }
   try {
-    const res = await fetch('/api/ifs/sales-part-set', {
+    const res = await fetch(dataset.apiRoute, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -142,6 +177,49 @@ export async function fetchLiveSalesParts(env, config) {
   } catch (err) {
     return { success: false, error: err.message }
   }
+}
+
+// Console-only diagnostic: runs a real GET for `dataset` using the saved
+// config and session token of `env`, and logs everything about it. Secrets
+// are masked so they don't end up in the browser console.
+export async function runEnvironmentTest(dataset, env) {
+  const config = getEnvironmentConfig(env)
+  const mask = (value) => (value ? '••••••••' : '')
+  const describeToken = (token) =>
+    token
+      ? {
+          type: token.tokenType,
+          expiresAt: new Date(token.expiresAt).toLocaleString(),
+          accessToken: `${token.accessToken.slice(0, 12)}… (${token.accessToken.length} chars)`
+        }
+      : null
+
+  let url = null
+  try {
+    url = buildLiveDataUrl(config.baseUrl, dataset)
+  } catch {
+    url = null
+  }
+
+  console.group(`[${env}] environment test — ${dataset.title}`)
+  console.log('Environment:', env)
+  console.log('Variables used:', { ...config, clientSecret: mask(config.clientSecret), password: mask(config.password) })
+  console.log('Request:', `GET ${url ?? '(no Base URL configured)'}`)
+  console.log('Session token before:', describeToken(getSessionToken(env)) ?? 'none cached — one will be requested')
+
+  const started = performance.now()
+  const result = await fetchLiveData(dataset, env, config)
+  console.log(`Finished in ${Math.round(performance.now() - started)} ms`)
+  console.log('Session token after:', describeToken(getSessionToken(env)) ?? 'none')
+
+  if (result.success) {
+    console.log(`SUCCESS — ${result.records.length} record(s)`)
+    console.table(result.records)
+    console.log('Raw records:', result.records)
+  } else {
+    console.error('FAILED —', result.error)
+  }
+  console.groupEnd()
 }
 
 // IFS OData responses carry internal/technical bookkeeping fields alongside
@@ -190,15 +268,26 @@ export const SALES_PART_MIGRATION_FIELDS = [
   'CreatePurchasePart', 'ExternalTaxCalcMethod', 'TaxManufEquivalent'
 ]
 
-// Narrows full SalesPartSet records down to the migration payload shape.
-export function buildSalesPartMigrationPayload(records) {
+export const PERSON_GROUP_MIGRATION_FIELDS = ['GroupId', 'GroupDescription']
+
+// Narrows full records down to a payload containing only the given fields,
+// in the given order.
+function pickFields(records, fields) {
   return records.map((record) => {
     const picked = {}
-    SALES_PART_MIGRATION_FIELDS.forEach((key) => {
+    fields.forEach((key) => {
       if (key in record) picked[key] = record[key]
     })
     return picked
   })
+}
+
+export function buildSalesPartMigrationPayload(records) {
+  return pickFields(records, SALES_PART_MIGRATION_FIELDS)
+}
+
+export function buildPersonGroupMigrationPayload(records) {
+  return pickFields(records, PERSON_GROUP_MIGRATION_FIELDS)
 }
 
 function mockCustomerRecord(i) {
