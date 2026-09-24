@@ -219,12 +219,12 @@ function mockCompanyRecord(i) {
   }
 }
 
-function mockInventoryRecord(i) {
+function mockMasterPartRecord(i) {
   const warehouses = ['SITE-01', 'SITE-02', 'SITE-03']
   const uoms = ['EA', 'KG', 'BOX', 'LTR']
   return {
     sku: `INV-${String(1000 + i)}`,
-    description: `Inventory Item ${1000 + i}`,
+    description: `Master Part ${1000 + i}`,
     warehouse: warehouses[i % warehouses.length],
     uom: uoms[i % uoms.length]
   }
@@ -239,12 +239,64 @@ function mockSupplierRecord(i) {
   }
 }
 
+function mockSiteRecord(i) {
+  const companies = ['COMP-100', 'COMP-101', 'COMP-102']
+  return {
+    code: `SITE-${String(100 + i)}`,
+    name: `Site ${100 + i}`,
+    company: companies[i % companies.length]
+  }
+}
+
+function mockInventoryLocationRecord(i) {
+  const warehouses = ['SITE-01', 'SITE-02', 'SITE-03']
+  const types = ['Bin', 'Rack', 'Zone']
+  return {
+    code: `LOC-${String(1000 + i)}`,
+    description: `Location ${1000 + i}`,
+    warehouse: warehouses[i % warehouses.length],
+    type: types[i % types.length]
+  }
+}
+
+// 'mandatory' entities are foundational (Company/Site must exist before basic
+// data can reference them); 'basic' entities are transferred afterwards.
+export const ENTITY_GROUPS = [
+  { id: 'mandatory', label: 'Transfer Mandatory Data' },
+  { id: 'basic', label: 'Transfer Basic Data' }
+]
+
 export const AVAILABLE_ENTITIES = [
+  {
+    id: 'company',
+    label: 'Company',
+    description: 'Company master records',
+    enabled: true,
+    group: 'mandatory',
+    defaultCount: 12,
+    idKey: 'code',
+    rowPrimary: 'name',
+    rowSecondary: ['code', 'country'],
+    generator: mockCompanyRecord
+  },
+  {
+    id: 'site',
+    label: 'Site',
+    description: 'Company site records',
+    enabled: true,
+    group: 'mandatory',
+    defaultCount: 8,
+    idKey: 'code',
+    rowPrimary: 'name',
+    rowSecondary: ['code', 'company'],
+    generator: mockSiteRecord
+  },
   {
     id: 'customer',
     label: 'Customer',
     description: 'Customer master records',
     enabled: true,
+    group: 'basic',
     defaultCount: 58,
     idKey: 'code',
     rowPrimary: 'name',
@@ -253,37 +305,40 @@ export const AVAILABLE_ENTITIES = [
     generator: mockCustomerRecord
   },
   {
-    id: 'company',
-    label: 'Company',
-    description: 'Company master records',
+    id: 'masterPart',
+    label: 'Master Part',
+    description: 'Master part records',
     enabled: true,
-    defaultCount: 12,
-    idKey: 'code',
-    rowPrimary: 'name',
-    rowSecondary: ['code', 'country'],
-    generator: mockCompanyRecord
-  },
-  {
-    id: 'inventory',
-    label: 'Inventory',
-    description: 'Inventory master records',
-    enabled: true,
+    group: 'basic',
     defaultCount: 42,
     idKey: 'sku',
     rowPrimary: 'description',
     rowSecondary: ['sku', 'warehouse', 'uom'],
-    generator: mockInventoryRecord
+    generator: mockMasterPartRecord
   },
   {
     id: 'supplier',
     label: 'Supplier',
     description: 'Supplier master records',
     enabled: true,
+    group: 'basic',
     defaultCount: 27,
     idKey: 'code',
     rowPrimary: 'name',
     rowSecondary: ['code', 'category'],
     generator: mockSupplierRecord
+  },
+  {
+    id: 'inventoryLocations',
+    label: 'Inventory Locations',
+    description: 'Inventory location records',
+    enabled: true,
+    group: 'basic',
+    defaultCount: 20,
+    idKey: 'code',
+    rowPrimary: 'description',
+    rowSecondary: ['code', 'warehouse', 'type'],
+    generator: mockInventoryLocationRecord
   }
 ]
 

@@ -10,6 +10,8 @@ import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined
 import ApartmentOutlinedIcon from '@mui/icons-material/ApartmentOutlined'
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined'
 import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined'
+import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined'
+import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
@@ -29,14 +31,19 @@ import {
 } from '../../../lib/migrationStore'
 import MigrationStepper from '../../../components/MigrationStepper'
 
-const STEPS = ['Configuration', 'Review Data', 'Migrate']
+const STEPS = ['Configuration', 'Transfer Mandatory Data', 'Transfer Basic Data', 'Transfer']
 
 const ENTITY_ICONS = {
-  customer: PersonOutlineOutlinedIcon,
   company: ApartmentOutlinedIcon,
-  inventory: Inventory2OutlinedIcon,
-  supplier: LocalShippingOutlinedIcon
+  site: RoomOutlinedIcon,
+  customer: PersonOutlineOutlinedIcon,
+  masterPart: Inventory2OutlinedIcon,
+  supplier: LocalShippingOutlinedIcon,
+  inventoryLocations: WarehouseOutlinedIcon
 }
+
+const MANDATORY_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'mandatory')
+const BASIC_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'basic')
 
 export default function NewMigrationPage() {
   const router = useRouter()
@@ -53,7 +60,7 @@ export default function NewMigrationPage() {
   const [sessionTokenInfo, setSessionTokenInfo] = useState(null)
   const [selectedEntities, setSelectedEntities] = useState([])
   const [loading, setLoading] = useState(false)
-  const [dataMap, setDataMap] = useState(null)
+  const [dataMap, setDataMap] = useState({})
   const [selectedRecordIds, setSelectedRecordIds] = useState({})
   const [selectedSubItems, setSelectedSubItems] = useState({})
   const [expandedRecords, setExpandedRecords] = useState(new Set())
@@ -61,7 +68,7 @@ export default function NewMigrationPage() {
   const [migrated, setMigrated] = useState(null)
 
   const sameEnv = fromEnv && toEnv && fromEnv === toEnv
-  const canFetch = fromEnv && toEnv && !sameEnv && selectedEntities.length > 0 && !loading
+  const canProceedConfig = fromEnv && toEnv && !sameEnv
 
   function envButtonStatus(env) {
     const config = env ? envConfigs[env] : null
@@ -135,12 +142,13 @@ export default function NewMigrationPage() {
     if (modalEnv !== modalOtherEnv) setEnvModalOpen(false)
   }
 
-  async function handleFetch() {
+  async function fetchGroup(entityIds) {
+    if (entityIds.length === 0) return
     setLoading(true)
-    const result = await fetchEntitiesData(selectedEntities)
+    const result = await fetchEntitiesData(entityIds)
     const initialSelection = {}
     const initialSubItems = {}
-    selectedEntities.forEach((id) => {
+    entityIds.forEach((id) => {
       const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
       initialSelection[id] = new Set(result[id].records.map((r) => r[entity.idKey]))
       if (entity.subMenu) {
@@ -150,13 +158,12 @@ export default function NewMigrationPage() {
         })
       }
     })
-    setDataMap(result)
-    setSelectedRecordIds(initialSelection)
-    setSelectedSubItems(initialSubItems)
+    setDataMap((prev) => ({ ...prev, ...result }))
+    setSelectedRecordIds((prev) => ({ ...prev, ...initialSelection }))
+    setSelectedSubItems((prev) => ({ ...prev, ...initialSubItems }))
     setExpandedRecords(new Set())
-    setActiveEntityId(selectedEntities[0])
+    setActiveEntityId(entityIds[0])
     setLoading(false)
-    setStep(1)
   }
 
   function toggleRecord(entityId, recordId) {
@@ -197,7 +204,7 @@ export default function NewMigrationPage() {
     })
   }
 
-  async function handleMigrate() {
+  async function handleTransfer() {
     setLoading(true)
     const breakdown = selectedEntities
       .map((id) => {
@@ -208,20 +215,197 @@ export default function NewMigrationPage() {
     const entry = await runMigration(fromEnv, toEnv, breakdown)
     setMigrated(entry)
     setLoading(false)
-    setStep(2)
+    setStep(3)
   }
 
-  const totalFetched = dataMap
-    ? selectedEntities.reduce((sum, id) => sum + (dataMap[id]?.total || 0), 0)
-    : 0
-  const totalSelected = dataMap
-    ? selectedEntities.reduce((sum, id) => sum + (selectedRecordIds[id]?.size || 0), 0)
-    : 0
+  const totalFetched = selectedEntities.reduce((sum, id) => sum + (dataMap[id]?.total || 0), 0)
+  const totalSelected = selectedEntities.reduce((sum, id) => sum + (selectedRecordIds[id]?.size || 0), 0)
 
-  const activeEntity = activeEntityId ? AVAILABLE_ENTITIES.find((e) => e.id === activeEntityId) : null
-  const activeData = activeEntityId ? dataMap?.[activeEntityId] : null
-  const activeSelectedIds = activeEntityId ? selectedRecordIds[activeEntityId] : null
-  const activeAllSelected = activeData && activeSelectedIds ? activeSelectedIds.size === activeData.total : false
+  function resetAll() {
+    setStep(0)
+    setFromEnv('')
+    setToEnv('')
+    setSelectedEntities([])
+    setDataMap({})
+    setSelectedRecordIds({})
+    setSelectedSubItems({})
+    setExpandedRecords(new Set())
+    setActiveEntityId(null)
+    setMigrated(null)
+  }
+
+  function renderEntityReview(groupEntities) {
+    const groupIds = groupEntities.map((e) => e.id)
+    const selectedInGroup = selectedEntities.filter((id) => groupIds.includes(id))
+    const fetchedIds = selectedInGroup.filter((id) => dataMap[id])
+    const displayEntityId = fetchedIds.includes(activeEntityId) ? activeEntityId : fetchedIds[0]
+    const displayEntity = displayEntityId ? AVAILABLE_ENTITIES.find((e) => e.id === displayEntityId) : null
+    const displayData = displayEntityId ? dataMap[displayEntityId] : null
+    const displaySelectedIds = displayEntityId ? selectedRecordIds[displayEntityId] : null
+    const displayAllSelected = displayData && displaySelectedIds ? displaySelectedIds.size === displayData.total : false
+
+    if (fetchedIds.length === 0 || !displayEntity) return null
+
+    const groupFetched = fetchedIds.reduce((sum, id) => sum + (dataMap[id]?.total || 0), 0)
+    const groupSelected = fetchedIds.reduce((sum, id) => sum + (selectedRecordIds[id]?.size || 0), 0)
+
+    return (
+      <>
+        <div className="panel">
+          <div className="security-summary">
+            <b>{groupSelected} of {groupFetched} records selected across {fetchedIds.length} {fetchedIds.length === 1 ? 'entity' : 'entities'}</b>
+          </div>
+        </div>
+
+        <div className="panel config-panel">
+          <div className="config-layout">
+            <div className="config-sidebar">
+              {fetchedIds.map((id) => {
+                const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
+                const Icon = ENTITY_ICONS[id]
+                return (
+                  <button
+                    type="button"
+                    key={id}
+                    className={`config-nav-item ${displayEntityId === id ? 'active' : ''}`}
+                    onClick={() => setActiveEntityId(id)}
+                  >
+                    <Icon className="config-nav-icon" fontSize="small" />
+                    <span className="config-nav-label">{entity.label}</span>
+                    <span className="config-nav-count">{dataMap[id].total}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="config-content">
+              <div className="config-content-header">
+                <div>
+                  <h3>{displayEntity.label.toUpperCase()}</h3>
+                  <p className="config-content-sub">
+                    {displaySelectedIds?.size || 0} of {displayData.total} selected for transfer
+                  </p>
+                </div>
+                <button type="button" className="secondary" onClick={() => toggleSelectAllForEntity(displayEntityId)}>
+                  {displayAllSelected ? 'Deselect all' : 'Select all'}
+                </button>
+              </div>
+
+              <div className="record-list">
+                {displayData.records.map((r) => {
+                  const recordId = r[displayEntity.idKey]
+                  const isChecked = displaySelectedIds?.has(recordId) || false
+                  const hasSubMenu = Boolean(displayEntity.subMenu)
+                  const isExpanded = expandedRecords.has(`${displayEntityId}:${recordId}`)
+                  const subItems = hasSubMenu ? selectedSubItems[displayEntityId]?.[recordId] : null
+
+                  return (
+                    <div className="record-group" key={recordId}>
+                      <div className="record-row">
+                        {hasSubMenu && (
+                          <button
+                            type="button"
+                            className={`record-expand ${isExpanded ? 'open' : ''}`}
+                            onClick={() => toggleExpand(displayEntityId, recordId)}
+                            aria-label="Toggle submenu"
+                          >
+                            <ExpandMoreIcon fontSize="small" />
+                          </button>
+                        )}
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleRecord(displayEntityId, recordId)}
+                        />
+                        <span className="record-info" onClick={() => toggleRecord(displayEntityId, recordId)}>
+                          <strong>{r[displayEntity.rowPrimary]}</strong>
+                          <small>{displayEntity.rowSecondary.map((key) => r[key]).join(' · ')}</small>
+                        </span>
+                      </div>
+
+                      {hasSubMenu && isExpanded && (
+                        <div className="record-submenu">
+                          {displayEntity.subMenu.map((item) => (
+                            <label className="submenu-row" key={item}>
+                              <input
+                                type="checkbox"
+                                checked={subItems?.has(item) || false}
+                                onChange={() => toggleSubItem(displayEntityId, recordId, item)}
+                              />
+                              <span>{item}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  function renderGroupStep({ groupEntities, heading, sub, shortLabel, backStep, nextLabel, onNext, nextDisabled, showGrandTotal }) {
+    const groupIds = groupEntities.map((e) => e.id)
+    const selectedInGroup = selectedEntities.filter((id) => groupIds.includes(id))
+    const canFetch = selectedInGroup.length > 0 && !loading
+    const allFetched = selectedInGroup.length > 0 && selectedInGroup.every((id) => dataMap[id])
+    const canProceed = selectedInGroup.length === 0 || allFetched
+
+    return (
+      <>
+        <div className="panel">
+          <h2>{heading}</h2>
+          <p className="login-sub" style={{ marginTop: -6 }}>{sub}</p>
+
+          <div className="column-grid">
+            {groupEntities.map((ent) => {
+              const isSelected = selectedEntities.includes(ent.id)
+              return (
+                <button
+                  type="button"
+                  key={ent.id}
+                  className={`column-card ${isSelected ? 'selected' : ''}`}
+                  style={{ position: 'relative' }}
+                  onClick={() => toggleEntity(ent.id)}
+                >
+                  {isSelected && <span className="entity-check">✓</span>}
+                  <span className="column-card-label">{ent.label}</span>
+                  <small>{ent.description}</small>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="actions">
+            <button onClick={() => fetchGroup(selectedInGroup)} disabled={!canFetch}>
+              {loading ? 'Fetching…' : `Fetch ${shortLabel} data`}
+            </button>
+          </div>
+        </div>
+
+        {renderEntityReview(groupEntities)}
+
+        {showGrandTotal && totalFetched > 0 && (
+          <div className="panel">
+            <div className="security-summary">
+              <b>{totalSelected} of {totalFetched} records selected for transfer across {selectedEntities.length} {selectedEntities.length === 1 ? 'entity' : 'entities'}</b>
+            </div>
+          </div>
+        )}
+
+        <div className="actions">
+          <button className="ghost" onClick={() => setStep(backStep)}>Back</button>
+          <button onClick={onNext} disabled={loading || !canProceed || nextDisabled}>
+            {nextLabel}
+          </button>
+        </div>
+      </>
+    )
+  }
 
   return (
     <>
@@ -229,7 +413,7 @@ export default function NewMigrationPage() {
         <div>
           <span className="eyebrow">NEW MIGRATION</span>
           <h1>Migrate data to IFS</h1>
-          <p>Configure the environments and entities, review what will move, then confirm the migration.</p>
+          <p>Configure the environments, transfer mandatory and basic data, then confirm the transfer.</p>
         </div>
       </header>
 
@@ -238,7 +422,7 @@ export default function NewMigrationPage() {
       {step === 0 && (
         <div className="panel">
           <h2>Configure migration</h2>
-          <p className="login-sub" style={{ marginTop: -6 }}>Select the source and destination environments, then choose the entities to migrate.</p>
+          <p className="login-sub" style={{ marginTop: -6 }}>Select the source and destination environments.</p>
 
           <div className="env-row">
             <label>
@@ -284,6 +468,15 @@ export default function NewMigrationPage() {
               )}
 
               <div className="env-form">
+                <label>
+                  Environment
+                  <select value={modalEnv} onChange={(e) => loadEnvIntoForm(e.target.value)}>
+                    {ENVIRONMENTS.map((env) => (
+                      <option key={env} value={env}>{env}</option>
+                    ))}
+                  </select>
+                </label>
+
                 <label>
                   Base URL
                   <input
@@ -387,28 +580,6 @@ export default function NewMigrationPage() {
             </DialogActions>
           </Dialog>
 
-          <h2 style={{ marginTop: 26 }}>Entities to migrate</h2>
-          <p className="login-sub" style={{ marginTop: -6 }}>Select one or more entities to fetch for review.</p>
-
-          <div className="column-grid">
-            {AVAILABLE_ENTITIES.map((ent) => {
-              const isSelected = selectedEntities.includes(ent.id)
-              return (
-                <button
-                  type="button"
-                  key={ent.id}
-                  className={`column-card ${isSelected ? 'selected' : ''}`}
-                  style={{ position: 'relative' }}
-                  onClick={() => toggleEntity(ent.id)}
-                >
-                  {isSelected && <span className="entity-check">✓</span>}
-                  <span className="column-card-label">{ent.label}</span>
-                  <small>{ent.description}</small>
-                </button>
-              )
-            })}
-          </div>
-
           <div className="actions">
             <button
               type="button"
@@ -419,128 +590,43 @@ export default function NewMigrationPage() {
               <CloudDownloadOutlinedIcon fontSize="small" />
               Get live data (SalesPartSet)
             </button>
-            <button onClick={handleFetch} disabled={!canFetch}>
-              {loading ? 'Fetching…' : 'Fetch selected data'}
+            <button onClick={() => setStep(1)} disabled={!canProceedConfig}>
+              Next
             </button>
           </div>
         </div>
       )}
 
-      {step === 1 && dataMap && activeEntity && (
-        <>
-          <div className="panel">
-            <h2>Review fetched data</h2>
-            <p className="login-sub" style={{ marginTop: -6 }}>{fromEnv} → {toEnv}</p>
+      {step === 1 && renderGroupStep({
+        groupEntities: MANDATORY_ENTITIES,
+        heading: 'Transfer mandatory data',
+        sub: 'Company and Site must exist in the destination before basic data can be transferred.',
+        shortLabel: 'mandatory',
+        backStep: 0,
+        nextLabel: 'Next',
+        onNext: () => setStep(2),
+        nextDisabled: false
+      })}
 
-            <div className="security-summary">
-              <b>{totalSelected} of {totalFetched} records selected for migration across {selectedEntities.length} {selectedEntities.length === 1 ? 'entity' : 'entities'}</b>
-            </div>
-          </div>
+      {step === 2 && renderGroupStep({
+        groupEntities: BASIC_ENTITIES,
+        heading: 'Transfer basic data',
+        sub: 'Select the basic entities to fetch for review.',
+        shortLabel: 'basic',
+        backStep: 1,
+        nextLabel: loading ? 'Transferring…' : `Transfer ${totalSelected} records to IFS`,
+        onNext: handleTransfer,
+        nextDisabled: totalSelected === 0,
+        showGrandTotal: true
+      })}
 
-          <div className="panel config-panel">
-            <div className="config-layout">
-              <div className="config-sidebar">
-                {selectedEntities.map((id) => {
-                  const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
-                  const Icon = ENTITY_ICONS[id]
-                  return (
-                    <button
-                      type="button"
-                      key={id}
-                      className={`config-nav-item ${activeEntityId === id ? 'active' : ''}`}
-                      onClick={() => setActiveEntityId(id)}
-                    >
-                      <Icon className="config-nav-icon" fontSize="small" />
-                      <span className="config-nav-label">{entity.label}</span>
-                      <span className="config-nav-count">{dataMap[id].total}</span>
-                    </button>
-                  )
-                })}
-              </div>
-
-              <div className="config-content">
-                <div className="config-content-header">
-                  <div>
-                    <h3>{activeEntity.label.toUpperCase()}</h3>
-                    <p className="config-content-sub">
-                      {activeSelectedIds?.size || 0} of {activeData.total} selected for migration
-                    </p>
-                  </div>
-                  <button type="button" className="secondary" onClick={() => toggleSelectAllForEntity(activeEntityId)}>
-                    {activeAllSelected ? 'Deselect all' : 'Select all'}
-                  </button>
-                </div>
-
-                <div className="record-list">
-                  {activeData.records.map((r) => {
-                    const recordId = r[activeEntity.idKey]
-                    const isChecked = activeSelectedIds?.has(recordId) || false
-                    const hasSubMenu = Boolean(activeEntity.subMenu)
-                    const isExpanded = expandedRecords.has(`${activeEntityId}:${recordId}`)
-                    const subItems = hasSubMenu ? selectedSubItems[activeEntityId]?.[recordId] : null
-
-                    return (
-                      <div className="record-group" key={recordId}>
-                        <div className="record-row">
-                          {hasSubMenu && (
-                            <button
-                              type="button"
-                              className={`record-expand ${isExpanded ? 'open' : ''}`}
-                              onClick={() => toggleExpand(activeEntityId, recordId)}
-                              aria-label="Toggle submenu"
-                            >
-                              <ExpandMoreIcon fontSize="small" />
-                            </button>
-                          )}
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => toggleRecord(activeEntityId, recordId)}
-                          />
-                          <span className="record-info" onClick={() => toggleRecord(activeEntityId, recordId)}>
-                            <strong>{r[activeEntity.rowPrimary]}</strong>
-                            <small>{activeEntity.rowSecondary.map((key) => r[key]).join(' · ')}</small>
-                          </span>
-                        </div>
-
-                        {hasSubMenu && isExpanded && (
-                          <div className="record-submenu">
-                            {activeEntity.subMenu.map((item) => (
-                              <label className="submenu-row" key={item}>
-                                <input
-                                  type="checkbox"
-                                  checked={subItems?.has(item) || false}
-                                  onChange={() => toggleSubItem(activeEntityId, recordId, item)}
-                                />
-                                <span>{item}</span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="actions">
-            <button className="ghost" onClick={() => setStep(0)}>Back</button>
-            <button onClick={handleMigrate} disabled={loading || totalSelected === 0}>
-              {loading ? 'Migrating…' : `Migrate ${totalSelected} records to IFS`}
-            </button>
-          </div>
-        </>
-      )}
-
-      {step === 2 && migrated && (
+      {step === 3 && migrated && (
         <div className="panel result-panel">
           <span className="badge HIGH" style={{ marginBottom: 10 }}>Completed</span>
-          <h2>Migration complete</h2>
+          <h2>Transfer complete</h2>
           <p>
             {migrated.totalRecords} records across {migrated.entities.length} {migrated.entities.length === 1 ? 'entity' : 'entities'} were
-            migrated from {migrated.fromEnv} to {migrated.toEnv} at {new Date(migrated.completedAt).toLocaleString()}.
+            transferred from {migrated.fromEnv} to {migrated.toEnv} at {new Date(migrated.completedAt).toLocaleString()}.
           </p>
           <div className="history-meta" style={{ marginBottom: 6 }}>
             {migrated.entities.map((e) => (
@@ -549,22 +635,8 @@ export default function NewMigrationPage() {
           </div>
           <div className="actions" style={{ justifyContent: 'flex-start' }}>
             <button onClick={() => router.push('/')}>Back to dashboard</button>
-            <button
-              className="secondary"
-              onClick={() => {
-                setStep(0)
-                setFromEnv('')
-                setToEnv('')
-                setSelectedEntities([])
-                setDataMap(null)
-                setSelectedRecordIds({})
-                setSelectedSubItems({})
-                setExpandedRecords(new Set())
-                setActiveEntityId(null)
-                setMigrated(null)
-              }}
-            >
-              Start another migration
+            <button className="secondary" onClick={resetAll}>
+              Start another transfer
             </button>
           </div>
         </div>
