@@ -43,7 +43,8 @@ export default function NewMigrationPage() {
   const [step, setStep] = useState(0)
   const [fromEnv, setFromEnv] = useState('')
   const [toEnv, setToEnv] = useState('')
-  const [fromEnvModalOpen, setFromEnvModalOpen] = useState(false)
+  const [envModalOpen, setEnvModalOpen] = useState(false)
+  const [modalTarget, setModalTarget] = useState('from') // 'from' | 'to'
   const [envConfigs, setEnvConfigs] = useState({})
   const [modalEnv, setModalEnv] = useState('')
   const [authForm, setAuthForm] = useState(DEFAULT_ENV_CONFIG)
@@ -62,16 +63,19 @@ export default function NewMigrationPage() {
   const sameEnv = fromEnv && toEnv && fromEnv === toEnv
   const canFetch = fromEnv && toEnv && !sameEnv && selectedEntities.length > 0 && !loading
 
-  const fromConfig = fromEnv ? envConfigs[fromEnv] : null
-  const fromEnvStatus = !fromEnv
-    ? 'base'
-    : sameEnv
-    ? 'error'
-    : fromConfig?.status === 'authorized'
-    ? 'success'
-    : fromConfig?.status === 'error'
-    ? 'error'
-    : 'base'
+  function envButtonStatus(env) {
+    const config = env ? envConfigs[env] : null
+    if (!env) return 'base'
+    if (sameEnv) return 'error'
+    if (config?.status === 'authorized') return 'success'
+    if (config?.status === 'error') return 'error'
+    return 'base'
+  }
+
+  const fromEnvStatus = envButtonStatus(fromEnv)
+  const toEnvStatus = envButtonStatus(toEnv)
+  const modalOtherEnv = modalTarget === 'from' ? toEnv : fromEnv
+  const modalOtherLabel = modalTarget === 'from' ? 'destination' : 'source'
 
   useEffect(() => {
     setEnvConfigs(getEnvironmentConfigs())
@@ -90,9 +94,11 @@ export default function NewMigrationPage() {
     setSessionTokenInfo(getSessionToken(env))
   }
 
-  function openFromEnvModal() {
-    loadEnvIntoForm(fromEnv || ENVIRONMENTS[0])
-    setFromEnvModalOpen(true)
+  function openEnvModal(target) {
+    const current = target === 'from' ? fromEnv : toEnv
+    setModalTarget(target)
+    loadEnvIntoForm(current || ENVIRONMENTS[0])
+    setEnvModalOpen(true)
   }
 
   function updateAuthField(field, value) {
@@ -124,8 +130,9 @@ export default function NewMigrationPage() {
       lastTestedAt: testStatus === 'success' || testStatus === 'error' ? new Date().toISOString() : null
     })
     setEnvConfigs((prev) => ({ ...prev, [modalEnv]: saved }))
-    setFromEnv(modalEnv)
-    if (modalEnv !== toEnv) setFromEnvModalOpen(false)
+    if (modalTarget === 'from') setFromEnv(modalEnv)
+    else setToEnv(modalEnv)
+    if (modalEnv !== modalOtherEnv) setEnvModalOpen(false)
   }
 
   async function handleFetch() {
@@ -239,7 +246,7 @@ export default function NewMigrationPage() {
               <button
                 type="button"
                 className={`env-select-btn env-status-${fromEnvStatus}`}
-                onClick={openFromEnvModal}
+                onClick={() => openEnvModal('from')}
               >
                 {fromEnvStatus === 'success' && <CheckCircleOutlineIcon fontSize="small" />}
                 {fromEnvStatus === 'error' && <ErrorOutlineIcon fontSize="small" />}
@@ -249,27 +256,30 @@ export default function NewMigrationPage() {
             <span className="env-arrow">→</span>
             <label>
               To environment
-              <select value={toEnv} onChange={(e) => setToEnv(e.target.value)}>
-                <option value="">Select environment</option>
-                {ENVIRONMENTS.map((env) => (
-                  <option key={env} value={env}>{env}</option>
-                ))}
-              </select>
+              <button
+                type="button"
+                className={`env-select-btn env-status-${toEnvStatus}`}
+                onClick={() => openEnvModal('to')}
+              >
+                {toEnvStatus === 'success' && <CheckCircleOutlineIcon fontSize="small" />}
+                {toEnvStatus === 'error' && <ErrorOutlineIcon fontSize="small" />}
+                <span>{toEnv || 'Select environment'}</span>
+              </button>
             </label>
           </div>
           {sameEnv && <div className="error">Source and destination environments must be different.</div>}
 
-          <Dialog open={fromEnvModalOpen} onClose={() => setFromEnvModalOpen(false)} fullWidth maxWidth="sm">
-            <DialogTitle>Configure source environment (IFS API)</DialogTitle>
+          <Dialog open={envModalOpen} onClose={() => setEnvModalOpen(false)} fullWidth maxWidth="sm">
+            <DialogTitle>Configure {modalTarget === 'from' ? 'source' : 'destination'} environment (IFS API)</DialogTitle>
             <DialogContent>
               <p className="login-sub" style={{ marginTop: -4 }}>
                 These settings define how the tool authorizes against the IFS Cloud REST API for this
                 environment before issuing GET requests to fetch entities.
               </p>
 
-              {modalEnv === toEnv && (
+              {modalEnv === modalOtherEnv && (
                 <div className="error" style={{ marginTop: 10 }}>
-                  {modalEnv} is already selected as the destination environment.
+                  {modalEnv} is already selected as the {modalOtherLabel} environment.
                 </div>
               )}
 
@@ -367,7 +377,7 @@ export default function NewMigrationPage() {
               )}
             </DialogContent>
             <DialogActions>
-              <button type="button" className="ghost" onClick={() => setFromEnvModalOpen(false)}>Cancel</button>
+              <button type="button" className="ghost" onClick={() => setEnvModalOpen(false)}>Cancel</button>
               <button type="button" className="secondary" onClick={handleTestConnection} disabled={testStatus === 'testing'}>
                 {testStatus === 'testing' ? 'Authorizing…' : 'Test connection'}
               </button>
