@@ -19,6 +19,7 @@ import {
   ENVIRONMENTS,
   GRANT_TYPES,
   DEFAULT_ENV_CONFIG,
+  LIVE_DATASETS,
   fetchEntitiesData,
   runMigration,
   getEnvironmentConfigs,
@@ -403,11 +404,20 @@ export default function NewMigrationPage() {
             <button
               type="button"
               className="secondary"
-              onClick={() => router.push(`/new-migration/sales-part-set?env=${encodeURIComponent(fromEnv)}`)}
+              onClick={() => router.push(`${LIVE_DATASETS.salesPart.pageRoute}?env=${encodeURIComponent(fromEnv)}`)}
               disabled={!fromEnv}
             >
               <CloudDownloadOutlinedIcon fontSize="small" />
               Get live data (SalesPartSet)
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => router.push(`${LIVE_DATASETS.personGroup.pageRoute}?env=${encodeURIComponent(fromEnv)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (Person Group)
             </button>
             <button onClick={handleFetch} disabled={!canFetch}>
               {loading ? 'Fetching…' : 'Fetch selected data'}
