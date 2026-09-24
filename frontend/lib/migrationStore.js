@@ -12,6 +12,19 @@ export const GRANT_TYPES = [
   { value: 'password', label: 'Password (resource owner)' }
 ]
 
+// The IFS Cloud Keycloak realm is the tenant's Namespace system parameter,
+// which can't be derived from the host — so the suggested path leaves a
+// {YourNamespace} placeholder for the user to replace by hand.
+export function suggestAuthPath(baseUrl) {
+  try {
+    const { origin, hostname } = new URL(baseUrl.trim())
+    if (!hostname.includes('.')) return ''
+    return `${origin}/auth/realms/{YourNamespace}/protocol/openid-connect/token`
+  } catch {
+    return ''
+  }
+}
+
 export const DEFAULT_ENV_CONFIG = {
   baseUrl: '',
   authPath: '',
@@ -164,6 +177,49 @@ export async function fetchLiveData(dataset, env, config) {
   } catch (err) {
     return { success: false, error: err.message }
   }
+}
+
+// Console-only diagnostic: runs a real GET for `dataset` using the saved
+// config and session token of `env`, and logs everything about it. Secrets
+// are masked so they don't end up in the browser console.
+export async function runEnvironmentTest(dataset, env) {
+  const config = getEnvironmentConfig(env)
+  const mask = (value) => (value ? '••••••••' : '')
+  const describeToken = (token) =>
+    token
+      ? {
+          type: token.tokenType,
+          expiresAt: new Date(token.expiresAt).toLocaleString(),
+          accessToken: `${token.accessToken.slice(0, 12)}… (${token.accessToken.length} chars)`
+        }
+      : null
+
+  let url = null
+  try {
+    url = buildLiveDataUrl(config.baseUrl, dataset)
+  } catch {
+    url = null
+  }
+
+  console.group(`[${env}] environment test — ${dataset.title}`)
+  console.log('Environment:', env)
+  console.log('Variables used:', { ...config, clientSecret: mask(config.clientSecret), password: mask(config.password) })
+  console.log('Request:', `GET ${url ?? '(no Base URL configured)'}`)
+  console.log('Session token before:', describeToken(getSessionToken(env)) ?? 'none cached — one will be requested')
+
+  const started = performance.now()
+  const result = await fetchLiveData(dataset, env, config)
+  console.log(`Finished in ${Math.round(performance.now() - started)} ms`)
+  console.log('Session token after:', describeToken(getSessionToken(env)) ?? 'none')
+
+  if (result.success) {
+    console.log(`SUCCESS — ${result.records.length} record(s)`)
+    console.table(result.records)
+    console.log('Raw records:', result.records)
+  } else {
+    console.error('FAILED —', result.error)
+  }
+  console.groupEnd()
 }
 
 // IFS OData responses carry internal/technical bookkeeping fields alongside
