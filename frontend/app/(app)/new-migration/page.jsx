@@ -27,11 +27,12 @@ import {
   getEnvironmentConfig,
   saveEnvironmentConfig,
   testEnvironmentConnection,
-  getSessionToken
+  getSessionToken,
+  getHistory
 } from '../../../lib/migrationStore'
 import MigrationStepper from '../../../components/MigrationStepper'
 
-const STEPS = ['Configuration', 'Transfer Mandatory Data', 'Transfer Basic Data', 'Transfer']
+const STEPS = ['Configuration', 'Select Entities', 'Review Data', 'Transfer']
 
 const ENTITY_ICONS = {
   company: ApartmentOutlinedIcon,
@@ -66,6 +67,7 @@ export default function NewMigrationPage() {
   const [expandedRecords, setExpandedRecords] = useState(new Set())
   const [activeEntityId, setActiveEntityId] = useState(null)
   const [migrated, setMigrated] = useState(null)
+  const [transferredEntityIds, setTransferredEntityIds] = useState(new Set())
 
   const sameEnv = fromEnv && toEnv && fromEnv === toEnv
   const canProceedConfig = fromEnv && toEnv && !sameEnv
@@ -84,9 +86,23 @@ export default function NewMigrationPage() {
   const modalOtherEnv = modalTarget === 'from' ? toEnv : fromEnv
   const modalOtherLabel = modalTarget === 'from' ? 'destination' : 'source'
 
+  // Scoped to the current from→to pair: an entity already sitting in a
+  // different destination doesn't mean it exists in *this* one.
+  function refreshTransferredEntities() {
+    const ids = new Set()
+    getHistory()
+      .filter((entry) => entry.fromEnv === fromEnv && entry.toEnv === toEnv)
+      .forEach((entry) => entry.entities.forEach((e) => ids.add(e.id)))
+    setTransferredEntityIds(ids)
+  }
+
   useEffect(() => {
     setEnvConfigs(getEnvironmentConfigs())
   }, [])
+
+  useEffect(() => {
+    refreshTransferredEntities()
+  }, [fromEnv, toEnv])
 
   function toggleEntity(id) {
     setSelectedEntities((prev) => (prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]))
@@ -214,6 +230,7 @@ export default function NewMigrationPage() {
       .filter((e) => e.total > 0)
     const entry = await runMigration(fromEnv, toEnv, breakdown)
     setMigrated(entry)
+    refreshTransferredEntities()
     setLoading(false)
     setStep(3)
   }
@@ -246,17 +263,8 @@ export default function NewMigrationPage() {
 
     if (fetchedIds.length === 0 || !displayEntity) return null
 
-    const groupFetched = fetchedIds.reduce((sum, id) => sum + (dataMap[id]?.total || 0), 0)
-    const groupSelected = fetchedIds.reduce((sum, id) => sum + (selectedRecordIds[id]?.size || 0), 0)
-
     return (
       <>
-        <div className="panel">
-          <div className="security-summary">
-            <b>{groupSelected} of {groupFetched} records selected across {fetchedIds.length} {fetchedIds.length === 1 ? 'entity' : 'entities'}</b>
-          </div>
-        </div>
-
         <div className="panel config-panel">
           <div className="config-layout">
             <div className="config-sidebar">
@@ -348,59 +356,134 @@ export default function NewMigrationPage() {
     )
   }
 
-  function renderGroupStep({ groupEntities, heading, sub, shortLabel, backStep, nextLabel, onNext, nextDisabled, showGrandTotal }) {
-    const groupIds = groupEntities.map((e) => e.id)
-    const selectedInGroup = selectedEntities.filter((id) => groupIds.includes(id))
-    const canFetch = selectedInGroup.length > 0 && !loading
-    const allFetched = selectedInGroup.length > 0 && selectedInGroup.every((id) => dataMap[id])
-    const canProceed = selectedInGroup.length === 0 || allFetched
+  function getUnmetDependencies(ent, selectedInGroup) {
+    return (ent.dependsOn || []).filter((depId) => !selectedInGroup.includes(depId))
+  }
+
+  // Hardcoded via each entity's dependsOn for now — flattens the group's entities
+  // plus their prerequisites into a single ordered transfer sequence. Real
+  // cross-entity validation will replace this later.
+  function computeTransferOrder(groupEntities) {
+    const ordered = []
+    const visited = new Set()
+    function visit(entity) {
+      if (!entity || visited.has(entity.id)) return
+      visited.add(entity.id)
+      ;(entity.dependsOn || []).forEach((depId) => visit(AVAILABLE_ENTITIES.find((e) => e.id === depId)))
+      ordered.push(entity)
+    }
+    groupEntities.forEach(visit)
+    return ordered
+  }
+
+  async function handleFetchAndProceed() {
+    await fetchGroup(selectedEntities)
+    setStep(2)
+  }
+
+  function renderEntityCard(ent) {
+    const isSelected = selectedEntities.includes(ent.id)
+    const isTransferred = transferredEntityIds.has(ent.id)
+    return (
+      <button
+        type="button"
+        key={ent.id}
+        className={`column-card ${isSelected ? 'selected' : ''} ${isTransferred ? 'transferred' : ''}`}
+        style={{ position: 'relative' }}
+        onClick={() => toggleEntity(ent.id)}
+      >
+        {isSelected && <span className="entity-check">✓</span>}
+        <span className="column-card-label">{ent.label}</span>
+        <small>{ent.description}</small>
+      </button>
+    )
+  }
+
+  function renderSelectEntitiesStep() {
+    const dependencyIssues = AVAILABLE_ENTITIES
+      .filter((ent) => selectedEntities.includes(ent.id))
+      .map((ent) => ({ ent, missing: getUnmetDependencies(ent, selectedEntities) }))
+      .filter((issue) => issue.missing.length > 0)
+    const canProceed = selectedEntities.length > 0 && dependencyIssues.length === 0 && !loading
 
     return (
       <>
         <div className="panel">
-          <h2>{heading}</h2>
-          <p className="login-sub" style={{ marginTop: -6 }}>{sub}</p>
+          <h2>Select entities</h2>
+          <p className="login-sub" style={{ marginTop: -6 }}>Choose the entities to transfer. Company and Site are required before other entities can be transferred.</p>
 
-          <div className="column-grid">
-            {groupEntities.map((ent) => {
-              const isSelected = selectedEntities.includes(ent.id)
-              return (
-                <button
-                  type="button"
-                  key={ent.id}
-                  className={`column-card ${isSelected ? 'selected' : ''}`}
-                  style={{ position: 'relative' }}
-                  onClick={() => toggleEntity(ent.id)}
-                >
-                  {isSelected && <span className="entity-check">✓</span>}
-                  <span className="column-card-label">{ent.label}</span>
-                  <small>{ent.description}</small>
-                </button>
-              )
-            })}
-          </div>
+          <div className="group-layout">
+            <div className="group-main">
+              <h3 className="entity-group-heading">Mandatory</h3>
+              <div className="column-grid">
+                {MANDATORY_ENTITIES.map(renderEntityCard)}
+              </div>
 
-          <div className="actions">
-            <button onClick={() => fetchGroup(selectedInGroup)} disabled={!canFetch}>
-              {loading ? 'Fetching…' : `Fetch ${shortLabel} data`}
-            </button>
+              <h3 className="entity-group-heading" style={{ marginTop: 22 }}>Basic</h3>
+              <div className="column-grid">
+                {BASIC_ENTITIES.map(renderEntityCard)}
+              </div>
+
+              {dependencyIssues.length > 0 && (
+                <div className="error" style={{ marginTop: 14 }}>
+                  {dependencyIssues.map(({ ent, missing }) => (
+                    <div key={ent.id}>
+                      {ent.label} requires {missing.map((id) => AVAILABLE_ENTITIES.find((e) => e.id === id).label).join(', ')} to be selected.
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="dependency-panel">
+              <h4>Transfer order</h4>
+              {selectedEntities.length === 0 ? (
+                <p className="field-hint">Select entities to see the transfer order.</p>
+              ) : (
+                <div className="dependency-steps">
+                  {computeTransferOrder(AVAILABLE_ENTITIES.filter((e) => selectedEntities.includes(e.id))).map((ent, i) => {
+                    const isSelected = selectedEntities.includes(ent.id)
+                    return (
+                      <div className={`dependency-step ${isSelected ? 'selected' : ''}`} key={ent.id}>
+                        <span className="dependency-step-index">{i + 1}</span>
+                        <span className="dependency-step-label">{ent.label}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {renderEntityReview(groupEntities)}
+        <div className="actions">
+          <button className="ghost" onClick={() => setStep(0)}>Back</button>
+          <button onClick={handleFetchAndProceed} disabled={!canProceed}>
+            {loading ? 'Fetching…' : 'Fetch Data'}
+          </button>
+        </div>
+      </>
+    )
+  }
 
-        {showGrandTotal && totalFetched > 0 && (
-          <div className="panel">
-            <div className="security-summary">
-              <b>{totalSelected} of {totalFetched} records selected for transfer across {selectedEntities.length} {selectedEntities.length === 1 ? 'entity' : 'entities'}</b>
-            </div>
+  function renderReviewDataStep() {
+    return (
+      <>
+        <div className="panel">
+          <h2>Review fetched data</h2>
+          <p className="login-sub" style={{ marginTop: -6 }}>{fromEnv} → {toEnv}</p>
+
+          <div className="security-summary">
+            <b>{totalSelected} of {totalFetched} records selected for transfer across {selectedEntities.length} {selectedEntities.length === 1 ? 'entity' : 'entities'}</b>
           </div>
-        )}
+        </div>
+
+        {renderEntityReview(AVAILABLE_ENTITIES)}
 
         <div className="actions">
-          <button className="ghost" onClick={() => setStep(backStep)}>Back</button>
-          <button onClick={onNext} disabled={loading || !canProceed || nextDisabled}>
-            {nextLabel}
+          <button className="ghost" onClick={() => setStep(1)}>Back</button>
+          <button onClick={handleTransfer} disabled={loading || totalSelected === 0}>
+            {loading ? 'Transferring…' : `Transfer ${totalSelected} records to IFS`}
           </button>
         </div>
       </>
@@ -413,7 +496,7 @@ export default function NewMigrationPage() {
         <div>
           <span className="eyebrow">NEW MIGRATION</span>
           <h1>Migrate data to IFS</h1>
-          <p>Configure the environments, transfer mandatory and basic data, then confirm the transfer.</p>
+          <p>Configure the environments, select entities to transfer, review the data, then confirm the transfer.</p>
         </div>
       </header>
 
@@ -601,28 +684,9 @@ export default function NewMigrationPage() {
         </div>
       )}
 
-      {step === 1 && renderGroupStep({
-        groupEntities: MANDATORY_ENTITIES,
-        heading: 'Transfer mandatory data',
-        sub: 'Company and Site must exist in the destination before basic data can be transferred.',
-        shortLabel: 'mandatory',
-        backStep: 0,
-        nextLabel: 'Next',
-        onNext: () => setStep(2),
-        nextDisabled: false
-      })}
+      {step === 1 && renderSelectEntitiesStep()}
 
-      {step === 2 && renderGroupStep({
-        groupEntities: BASIC_ENTITIES,
-        heading: 'Transfer basic data',
-        sub: 'Select the basic entities to fetch for review.',
-        shortLabel: 'basic',
-        backStep: 1,
-        nextLabel: loading ? 'Transferring…' : `Transfer ${totalSelected} records to IFS`,
-        onNext: handleTransfer,
-        nextDisabled: totalSelected === 0,
-        showGrandTotal: true
-      })}
+      {step === 2 && renderReviewDataStep()}
 
       {step === 3 && migrated && (
         <div className="panel result-panel">
