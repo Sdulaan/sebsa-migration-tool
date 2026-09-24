@@ -421,12 +421,12 @@ export default function NewMigrationPage() {
 
       {step === 0 && (
         <div className="panel">
-          <h2>Configure migration</h2>
+          <h2>Configure Migration</h2>
           <p className="login-sub" style={{ marginTop: -6 }}>Select the source and destination environments.</p>
 
           <div className="env-row">
             <label>
-              From environment
+              Source Environment
               <button
                 type="button"
                 className={`env-select-btn env-status-${fromEnvStatus}`}
@@ -439,7 +439,7 @@ export default function NewMigrationPage() {
             </label>
             <span className="env-arrow">→</span>
             <label>
-              To environment
+              Destination Environment
               <button
                 type="button"
                 className={`env-select-btn env-status-${toEnvStatus}`}
@@ -468,13 +468,17 @@ export default function NewMigrationPage() {
               )}
 
               <div className="env-form">
+                {/* TEMP bypass for UI workflow testing — replace with a proper environment
+                    picker + validation (e.g. prevent duplicate/blank names) before release. */}
                 <label>
-                  Environment
-                  <select value={modalEnv} onChange={(e) => loadEnvIntoForm(e.target.value)}>
-                    {ENVIRONMENTS.map((env) => (
-                      <option key={env} value={env}>{env}</option>
-                    ))}
-                  </select>
+                  Environment name
+                  <input
+                    type="text"
+                    placeholder="e.g. Production"
+                    value={modalEnv}
+                    onChange={(e) => setModalEnv(e.target.value)}
+                  />
+                  <small className="field-hint">Temporary free-text entry for UI testing — will become a proper picker later.</small>
                 </label>
 
                 <label>
