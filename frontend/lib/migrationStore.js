@@ -126,6 +126,19 @@ export function buildSalesPartSetUrl(baseUrl) {
   return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/SalesPartHandling.svc/SalesPartSet`
 }
 
+// PartHandling projection's PartCatalogSet — see fetchLivePartCatalog.
+export function buildPartCatalogSetUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/PartHandling.svc/PartCatalogSet`
+}
+
+// The same projection's OData $batch endpoint — parts are created through
+// this, many per request, see postPartCatalogParts.
+export function buildPartHandlingBatchUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/PartHandling.svc/$batch`
+}
+
 // Calls our own /api route (server-side) so the OAuth2 client secret never
 // reaches the browser bundle and the request isn't blocked by CORS. Reuses
 // the session token from a prior "Test connection" when one is still valid,
@@ -154,6 +167,75 @@ export async function fetchLiveSalesParts(env, config) {
     }
     if (body.token) setSessionToken(env, body.token)
     return { success: true, records: body.records || [] }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Runs the authenticated GET against PartCatalogSet using the given
+// environment's saved authorization. Returns the extracted records (for the
+// live-data page) along with the raw response body.
+export async function fetchLivePartCatalog(env, config) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure source environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/part-catalog-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).`, response: body.response }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    const records = body.response?.value || body.response?.d?.results || (Array.isArray(body.response) ? body.response : [])
+    return { success: true, url: body.url, status: body.status, response: body.response, records }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Creates the given parts through the PartHandling $batch endpoint, authorized
+// by the given environment (the destination) — same session-token reuse as
+// the GETs above. A part IFS rejects doesn't fail the call: the result sorts
+// every part into successful / failed / unconfirmed (no identifiable answer).
+export async function postPartCatalogParts(env, config, parts) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure destination environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/part-catalog-set/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        records: parts,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return {
+      success: true,
+      url: body.url,
+      batchStatus: body.batchStatus,
+      summary: body.summary,
+      successful: body.successful,
+      failed: body.failed,
+      unconfirmed: body.unconfirmed
+    }
   } catch (err) {
     return { success: false, error: err.message }
   }
@@ -210,6 +292,34 @@ export function buildSalesPartMigrationPayload(records) {
   return records.map((record) => {
     const picked = {}
     SALES_PART_MIGRATION_FIELDS.forEach((key) => {
+      if (key in record) picked[key] = record[key]
+    })
+    return picked
+  })
+}
+
+// The exact field set the destination's PartCatalogSet POST body expects.
+export const PART_CATALOG_MIGRATION_FIELDS = [
+  'AllowAsNotConsumedDb', 'AllowStructChangeDb', 'CatchUnitEnabledDb', 'ComponentLotRule',
+  'ConditionCodeUsage', 'Configurable', 'Description', 'EngSerialTrackingCode', 'KitPart',
+  'KitPartDb', 'LotQuantityRule', 'LotTrackingCode', 'MultilevelTracking', 'PartNo', 'PositionPart',
+  'ReceiptIssueSerialTrackDb', 'SerialRule', 'SerialTrackingCode', 'StdNameId',
+  'StopArrivalIssuedSerialDb', 'StopNewSerialInRmaDb', 'SubLotRule', 'UnitCode', 'InfoText',
+  'PartMainGroup', 'CustWarrantyId', 'SupWarrantyId', 'InputUnitMeasGroupId', 'CatchUnitEnabled',
+  'StopArrivalIssuedSerial', 'WeightNet', 'UomForWeightNet', 'VolumeNet', 'UomForVolumeNet',
+  'FreightFactor', 'AllowAsNotConsumed', 'ReceiptIssueSerialTrack', 'StopNewSerialInRma',
+  'TechnicalDrawingNo', 'ProductTypeClassif', 'CestCode', 'FciCode', 'SerialLifecycleGroupId',
+  'PartCopySourceSite', 'PartCopyGroupId', 'CbsIbsUnitFactor', 'IsUnitFactor', 'LegalReference',
+  'TranslatableInfoText', 'PendingKitAvailReeval', 'InvPartExist', 'PurchPartExist',
+  'SalesPartExist', 'ConfigFamilyId', 'ConfigFamilyIdCheck', 'CopyFamily', 'LuName', 'KeyRef'
+]
+
+// Narrows full PartCatalogSet records down to POST-ready request bodies, one
+// per part.
+export function buildPartCatalogMigrationPayload(records) {
+  return records.map((record) => {
+    const picked = {}
+    PART_CATALOG_MIGRATION_FIELDS.forEach((key) => {
       if (key in record) picked[key] = record[key]
     })
     return picked

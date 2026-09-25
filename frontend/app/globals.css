@@ -98,6 +98,7 @@ header p{color:var(--text-muted);margin:0}
 .auth-banner{display:flex;align-items:center;gap:8px;padding:12px 14px;border-radius:var(--radius);margin-top:16px;font-size:13px}
 .auth-banner.success{background:var(--success-bg);color:var(--success-text)}
 .auth-banner.error{background:var(--danger-bg);color:var(--danger-text)}
+.auth-banner.warning{background:var(--warning-bg);color:var(--warning-text)}
 
 @media(max-width:480px){
   .env-form-pair{grid-template-columns:1fr}
