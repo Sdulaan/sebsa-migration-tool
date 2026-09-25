@@ -18,7 +18,8 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined'
 import {
   AVAILABLE_ENTITIES,
-  ENVIRONMENTS,
+  SOURCE_ENV,
+  DEST_ENV,
   GRANT_TYPES,
   DEFAULT_ENV_CONFIG,
   fetchEntitiesData,
@@ -27,6 +28,7 @@ import {
   getEnvironmentConfig,
   saveEnvironmentConfig,
   testEnvironmentConnection,
+  suggestAuthPath,
   getSessionToken,
   getHistory
 } from '../../../lib/migrationStore'
@@ -72,8 +74,18 @@ export default function NewMigrationPage() {
   const sameEnv = fromEnv && toEnv && fromEnv === toEnv
   const canProceedConfig = fromEnv && toEnv && !sameEnv
 
-  function envButtonStatus(env) {
-    const config = env ? envConfigs[env] : null
+  // fromEnv/toEnv are display labels (the configured Base URL host); settings
+  // themselves are stored under the fixed SOURCE_ENV / DEST_ENV keys.
+  function envLabel(baseUrl, fallback) {
+    try {
+      return new URL(baseUrl).host
+    } catch {
+      return baseUrl?.trim() || fallback
+    }
+  }
+
+  function envButtonStatus(env, role) {
+    const config = env ? envConfigs[role] : null
     if (!env) return 'base'
     if (sameEnv) return 'error'
     if (config?.status === 'authorized') return 'success'
@@ -81,9 +93,10 @@ export default function NewMigrationPage() {
     return 'base'
   }
 
-  const fromEnvStatus = envButtonStatus(fromEnv)
-  const toEnvStatus = envButtonStatus(toEnv)
+  const fromEnvStatus = envButtonStatus(fromEnv, SOURCE_ENV)
+  const toEnvStatus = envButtonStatus(toEnv, DEST_ENV)
   const modalOtherEnv = modalTarget === 'from' ? toEnv : fromEnv
+  const modalLabel = envLabel(authForm.baseUrl, modalEnv)
   const modalOtherLabel = modalTarget === 'from' ? 'destination' : 'source'
 
   // Scoped to the current from→to pair: an entity already sitting in a
@@ -118,14 +131,21 @@ export default function NewMigrationPage() {
   }
 
   function openEnvModal(target) {
-    const current = target === 'from' ? fromEnv : toEnv
     setModalTarget(target)
-    loadEnvIntoForm(current || ENVIRONMENTS[0])
+    loadEnvIntoForm(target === 'from' ? SOURCE_ENV : DEST_ENV)
     setEnvModalOpen(true)
   }
 
   function updateAuthField(field, value) {
-    setAuthForm((prev) => ({ ...prev, [field]: value }))
+    setAuthForm((prev) => {
+      const next = { ...prev, [field]: value }
+      // The authorization path follows the Base URL until the user edits it
+      // themselves (a hand-typed path is never overwritten).
+      if (field === 'baseUrl' && (!prev.authPath || prev.authPath === suggestAuthPath(prev.baseUrl))) {
+        next.authPath = suggestAuthPath(value)
+      }
+      return next
+    })
     setTestStatus('idle')
     setTestMessage('')
   }
@@ -153,9 +173,10 @@ export default function NewMigrationPage() {
       lastTestedAt: testStatus === 'success' || testStatus === 'error' ? new Date().toISOString() : null
     })
     setEnvConfigs((prev) => ({ ...prev, [modalEnv]: saved }))
-    if (modalTarget === 'from') setFromEnv(modalEnv)
-    else setToEnv(modalEnv)
-    if (modalEnv !== modalOtherEnv) setEnvModalOpen(false)
+    const label = envLabel(saved.baseUrl, modalEnv)
+    if (modalTarget === 'from') setFromEnv(label)
+    else setToEnv(label)
+    if (label !== modalOtherEnv) setEnvModalOpen(false)
   }
 
   async function fetchGroup(entityIds) {
@@ -544,26 +565,13 @@ export default function NewMigrationPage() {
                 environment before issuing GET requests to fetch entities.
               </p>
 
-              {modalEnv === modalOtherEnv && (
+              {modalOtherEnv && modalLabel === modalOtherEnv && (
                 <div className="error" style={{ marginTop: 10 }}>
-                  {modalEnv} is already selected as the {modalOtherLabel} environment.
+                  {modalLabel} is already configured as the {modalOtherLabel} environment.
                 </div>
               )}
 
               <div className="env-form">
-                {/* TEMP bypass for UI workflow testing — replace with a proper environment
-                    picker + validation (e.g. prevent duplicate/blank names) before release. */}
-                <label>
-                  Environment name
-                  <input
-                    type="text"
-                    placeholder="e.g. Production"
-                    value={modalEnv}
-                    onChange={(e) => setModalEnv(e.target.value)}
-                  />
-                  <small className="field-hint">Temporary free-text entry for UI testing — will become a proper picker later.</small>
-                </label>
-
                 <label>
                   Base URL
                   <input
@@ -578,11 +586,13 @@ export default function NewMigrationPage() {
                   Authorization path
                   <input
                     type="text"
-                    placeholder="/auth/realms/ifs/protocol/openid-connect/token"
+                    placeholder="{Base URL}/auth/realms/{YourNamespace}/protocol/openid-connect/token"
                     value={authForm.authPath}
                     onChange={(e) => updateAuthField('authPath', e.target.value)}
                   />
-                  <small className="field-hint">OAuth2 token endpoint used to authorize before calling IFS GET methods.</small>
+                  <small className="field-hint">
+                    {'Filled in from the Base URL — replace {YourNamespace} with your own namespace, which you can find in Solution Manager > Setup > System Parameters > parameter "Namespace".'}
+                  </small>
                 </label>
 
                 <label>
@@ -671,7 +681,7 @@ export default function NewMigrationPage() {
             <button
               type="button"
               className="secondary"
-              onClick={() => router.push(`/new-migration/sales-part-set?env=${encodeURIComponent(fromEnv)}`)}
+              onClick={() => router.push(`/new-migration/sales-part-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
               disabled={!fromEnv}
             >
               <CloudDownloadOutlinedIcon fontSize="small" />
