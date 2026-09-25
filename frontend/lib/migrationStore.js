@@ -2,7 +2,9 @@ const HISTORY_KEY = 'sebsa_ifs_migration_history'
 const ENV_CONFIG_KEY = 'sebsa_ifs_env_config'
 const SESSION_TOKEN_KEY = 'sebsa_ifs_session_tokens'
 
-export const ENVIRONMENTS = ['Development', 'Test', 'UAT', 'Production']
+// Connection settings are stored per role — there is no user-entered environment name.
+export const SOURCE_ENV = 'Source'
+export const DEST_ENV = 'Destination'
 
 // IFS Cloud REST APIs (projections) are called with an OAuth2 bearer token.
 // The token is obtained from the IFS Identity Provider's token endpoint (the
@@ -11,6 +13,19 @@ export const GRANT_TYPES = [
   { value: 'client_credentials', label: 'Client Credentials (service-to-service)' },
   { value: 'password', label: 'Password (resource owner)' }
 ]
+
+// The IFS Cloud Keycloak realm is the tenant's Namespace system parameter,
+// which can't be derived from the host — so the suggested path leaves a
+// {YourNamespace} placeholder for the user to replace by hand.
+export function suggestAuthPath(baseUrl) {
+  try {
+    const { origin, hostname } = new URL(baseUrl.trim())
+    if (!hostname.includes('.')) return ''
+    return `${origin}/auth/realms/{YourNamespace}/protocol/openid-connect/token`
+  } catch {
+    return ''
+  }
+}
 
 export const DEFAULT_ENV_CONFIG = {
   baseUrl: '',

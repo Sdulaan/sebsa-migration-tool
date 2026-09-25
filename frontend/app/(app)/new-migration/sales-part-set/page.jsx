@@ -8,7 +8,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
 import {
-  ENVIRONMENTS,
+  SOURCE_ENV,
   buildSalesPartSetUrl,
   buildSalesPartMigrationPayload,
   fetchLiveSalesParts,
@@ -19,7 +19,7 @@ import {
 function SalesPartSetContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const env = searchParams.get('env') || ENVIRONMENTS[0]
+  const env = searchParams.get('env') || SOURCE_ENV
 
   const [loading, setLoading] = useState(true)
   const [result, setResult] = useState(null)
