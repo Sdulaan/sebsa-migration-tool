@@ -6,6 +6,7 @@ import StepLabel from '@mui/material/StepLabel'
 import StepConnector, { stepConnectorClasses } from '@mui/material/StepConnector'
 import { styled } from '@mui/material/styles'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
+import TaskAltOutlinedIcon from '@mui/icons-material/TaskAltOutlined'
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
 import CheckIcon from '@mui/icons-material/Check'
@@ -56,8 +57,9 @@ const StepIconRoot = styled('div')(({ ownerState }) => ({
 
 const STEP_ICONS = {
   1: SettingsOutlinedIcon,
-  2: FactCheckOutlinedIcon,
-  3: CloudUploadOutlinedIcon
+  2: TaskAltOutlinedIcon,
+  3: FactCheckOutlinedIcon,
+  4: CloudUploadOutlinedIcon
 }
 
 function MigrationStepIcon(props) {
