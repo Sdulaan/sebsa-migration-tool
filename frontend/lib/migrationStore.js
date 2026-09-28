@@ -169,23 +169,54 @@ export function buildCreateCompanyBatchUrl(baseUrl) {
 
 // Company sub-entities, read via navigation properties off CompanySet — see
 // "REST APIs.xlsx" (Company sheet). Confirmed by matching each tab's field
-// names (lib/erpEntitySchema.js) against the sheet's sample payloads, not by
-// calling a real tenant. A few are scoped to one specific address (an
+// names (lib/entityTabsConfig.json, generated from the same sheet) against
+// the sheet's own sample payloads, not by calling a real tenant. Several tabs
+// share one underlying array (e.g. invoice/po_matching/document_management
+// are all CompanyInvoiceInfoArray — different field subsets of the same
+// record, per the sheet). A few are scoped to one specific address (an
 // AddressId, not just the company code) — see COMPANY_SUB_ENTITY_NEEDS_ADDRESS.
+// "employees" is the one exception to the nav-property pattern: CompanyEmpSet
+// is its own top-level entity set, filtered by Company.
 const COMPANY_SUB_ENTITY_PATHS = {
   address: (company) => `CompanySet(Company='${company}')/CompanyAddresses`,
-  messageSetup: (company) => `CompanySet(Company='${company}')/MessageSetups`,
-  invoice: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoDefInvTypes`,
+  message_setup: (company) => `CompanySet(Company='${company}')/MessageSetups`,
+  accounting_rules: (company) => `CompanySet(Company='${company}')/AccountingRulesBasicDataArray`,
+  currency_rate_type_information: (company) => `CompanySet(Company='${company}')/CurrencyTypeBasicDataArray`,
+  tax_control: (company) => `CompanySet(Company='${company}')/TaxControlBasicDataArray`,
+  invoice: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoArray`,
+  po_matching: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoArray`,
+  document_management: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoArray`,
+  default_invoice_type: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoDefInvTypes`,
   payment: (company) => `CompanySet(Company='${company}')/CompanyPayments`,
-  communicationMethods: (company, addressId) =>
+  proposal_parameters: (company) => `CompanySet(Company='${company}')/CompanyPayments`,
+  fixed_asset: (company) => `CompanySet(Company='${company}')/CompanyFixedAssetsArray`,
+  periodic_cost_allocation: (company) => `CompanySet(Company='${company}')/CompanyCostAllocInfoArray`,
+  warehouse_management: (company) => `CompanySet(Company='${company}')/CompanyWarehousingInfoArray`,
+  procument: (company) => `CompanySet(Company='${company}')/CompanyProcurementInfoArray`,
+  sales: (company) => `CompanySet(Company='${company}')/CompanySalesInfoArray`,
+  rental: (company) => `CompanySet(Company='${company}')/CompanyRentalInfoArray`,
+  employees: (company) => `CompanyEmpSet?$filter=Company eq '${company}'`,
+  address_types: (company, addressId) =>
+    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/AddressTypes`,
+  communication_methods: (company, addressId) =>
     `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/AddressCommunicationMethods`,
-  taxControl: (company, addressId) =>
+  tax_information: (company, addressId) =>
+    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/TaxCodes`,
+  tax_excempt_information: (company, addressId) =>
     `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/TaxExempArray`,
-  supplyChain: (company, addressId) =>
+  supply_chain_information: (company, addressId) =>
     `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/CompanyAddressSupplyChainInfoArray`
 }
 
-export const COMPANY_SUB_ENTITY_NEEDS_ADDRESS = new Set(['communicationMethods', 'taxControl', 'supplyChain'])
+export const COMPANY_SUB_ENTITY_TAB_IDS = Object.keys(COMPANY_SUB_ENTITY_PATHS)
+
+export const COMPANY_SUB_ENTITY_NEEDS_ADDRESS = new Set([
+  'address_types',
+  'communication_methods',
+  'tax_information',
+  'tax_excempt_information',
+  'supply_chain_information'
+])
 
 export function buildCompanySubEntityUrl(baseUrl, company, tabId, addressId) {
   if (!baseUrl) throw new Error('Base URL is required.')

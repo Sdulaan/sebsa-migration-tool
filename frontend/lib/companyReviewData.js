@@ -4,20 +4,29 @@
 // difference: [{ tabId, tabName, sections: [{ title, fields }] }].
 //
 // "general" is the already-fetched CompanySet record itself, no extra call.
-// The other tabs are one GET each (see COMPANY_SUB_ENTITY_PATHS in
-// migrationStore.js); three of them (communicationMethods, taxControl,
-// supplyChain) are scoped to one address, not the whole company — this uses
-// the first address the "address" tab itself returns. A company with several
-// addresses only shows those three tabs for that one address for now.
+// The other tabs this entity knows how to fetch (COMPANY_SUB_ENTITY_TAB_IDS
+// in migrationStore.js) are one GET each; a tab the Excel-generated schema
+// lists but this doesn't yet have an endpoint for just shows "Not available".
+// Some tabs are scoped to one address, not the whole company (see
+// COMPANY_SUB_ENTITY_NEEDS_ADDRESS) — this uses the first address the
+// "address" tab itself returns. A company with several addresses only shows
+// those tabs for that one address for now.
 //
 // Nothing here is ever sent back to IFS — Transfer still POSTs only the
 // header, via postCompanyHeaderBatch.
 
-import { SOURCE_ENV, getEnvironmentConfig, fetchCompanySubEntity, visibleRecordFields } from './migrationStore'
+import {
+  SOURCE_ENV,
+  getEnvironmentConfig,
+  fetchCompanySubEntity,
+  visibleRecordFields,
+  COMPANY_SUB_ENTITY_TAB_IDS,
+  COMPANY_SUB_ENTITY_NEEDS_ADDRESS
+} from './migrationStore'
 import { getEntitySubTabs } from './erpEntitySchema'
 
-const DIRECT_TABS = ['address', 'messageSetup', 'invoice', 'payment']
-const ADDRESS_SCOPED_TABS = ['communicationMethods', 'taxControl', 'supplyChain']
+const DIRECT_TABS = COMPANY_SUB_ENTITY_TAB_IDS.filter((id) => !COMPANY_SUB_ENTITY_NEEDS_ADDRESS.has(id))
+const ADDRESS_SCOPED_TABS = COMPANY_SUB_ENTITY_TAB_IDS.filter((id) => COMPANY_SUB_ENTITY_NEEDS_ADDRESS.has(id))
 
 // One section per record (a company can have several addresses, for
 // instance); each field rendered as plain text — this is real, read-only
