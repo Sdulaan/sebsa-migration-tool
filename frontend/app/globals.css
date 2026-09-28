@@ -245,3 +245,12 @@ td{vertical-align:top;padding:12px 10px;border-bottom:1px solid var(--border-sof
   .actions{flex-wrap:wrap}
   .login-card{padding:28px 22px}
 }
+
+.tx-table{min-width:560px}
+.tx-table td,.tx-table th{padding:9px 10px}
+.tx-count{color:var(--text-faint)}
+.tx-count.tx-SUCCESS{color:var(--success-text);font-weight:800}
+.tx-count.tx-ALREADY_EXISTS{color:var(--accent-strong);font-weight:800}
+.tx-count.tx-FAILED{color:var(--danger-text);font-weight:800}
+.tx-count.tx-SKIPPED{color:var(--text-muted);font-weight:800}
+.tx-count.tx-UNCONFIRMED{color:var(--warning-text);font-weight:800}

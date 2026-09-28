@@ -17,6 +17,7 @@ All paths are relative to the repo root. App code lives under `frontend/`.
 9. [Testing without a real IFS tenant](#9-testing-without-a-real-ifs-tenant)
 10. [Gotchas](#10-gotchas)
 11. [Status and known limits](#11-status-and-known-limits)
+12. [Multi-entity transfer and transaction log](#12-multi-entity-transfer-and-transaction-log)
 
 ---
 
@@ -56,6 +57,8 @@ Our routes are all `POST`, even when the upstream IFS call is a `GET`, because t
 | **GET** SalesPartSet | `fetchLiveSalesParts` | `/api/ifs/sales-part-set` | `SalesPartHandling.svc/SalesPartSet` | Source |
 | **GET** PartCatalogSet | `fetchLivePartCatalog` | `/api/ifs/part-catalog-set` | `PartHandling.svc/PartCatalogSet` | Source |
 | **POST** parts to PartCatalogSet | `postPartCatalogParts` | `/api/ifs/part-catalog-set/create` | `PartHandling.svc/$batch` | Destination |
+| **GET** any registry entity | `fetchEntityRecords` | `/api/ifs/entity` | `<projection>/<entitySet>` from `lib/entityRegistry.js` | Source |
+| **POST** any registry entity | `postEntityBatch` | `/api/ifs/batch` | `<projection>/$batch` from `lib/entityRegistry.js` | Destination |
 
 Pages: `/new-migration/sales-part-set` and `/new-migration/part-catalog-set` (the latter has the "Migrate data" button that does the POST).
 
@@ -393,6 +396,8 @@ Not used by the app today, but simple if an endpoint doesn't need batching: `POS
 
 ## 7. Adding a new GET
 
+> For the main New Migration transfer flow, don't follow these steps: add an entry to `frontend/lib/entityRegistry.js` instead (§12). The steps below are for a standalone live-data page.
+
 1. **URL builder** in `migrationStore.js`: `buildXUrl(baseUrl)` (copy `buildPartCatalogSetUrl`; change the `.svc` and entity set).
 2. **Route** at `frontend/app/api/ifs/<name>/route.js` (copy the template in §5). Keep `cache: 'no-store'`.
 3. **Client helper** `fetchLiveX(env, config)` in `migrationStore.js` (copy the template in §5).
@@ -403,6 +408,8 @@ Not used by the app today, but simple if an endpoint doesn't need batching: `POS
 If the endpoint is on the **destination**, use `DEST_ENV` for the token and config.
 
 ## 8. Adding a new POST
+
+> Same as §7: for the main transfer flow, a registry entry (§12) is all you need. `buildODataBatch` / `parseODataBatchResponse` in `ifsBatch.js` are now generic over the entity set.
 
 1. **Allow-list**: `X_MIGRATION_FIELDS` and `buildXMigrationPayload(records)` in `migrationStore.js` (copy the PartCatalog pair). Get the exact field list from a known-good sample POST body.
 2. **Batch URL builder** if it's a new projection: `buildYBatchUrl(baseUrl)` → `…/<Projection>.svc/$batch`. Each projection has its own `$batch`.
@@ -454,7 +461,64 @@ There is no test runner or ESLint config in the project. `npx next build` confir
 
 **Known limits**
 
-- **No pagination.** `@odata.nextLink` is not followed. If a projection pages its results, the GET will return only the first page.
-- **No chunking.** All selected records go in one `$batch` request. IFS may cap batch size.
-- **Duplicated boilerplate.** The token-resolution block (`accessToken` or mint via `requestIfsToken`) is copy-pasted across the routes. A shared `resolveAccessToken(body, fallbackOrigin)` in `ifsAuth.js` would remove it.
-- **The batch builder is PartCatalog-specific** (see §8 step 3).
+- **No pagination on the standalone routes.** `/api/ifs/sales-part-set` and `/api/ifs/part-catalog-set` don't follow `@odata.nextLink`. The generic `/api/ifs/entity` route does (up to 100 pages).
+- **No chunking on the standalone POST.** `/new-migration/part-catalog-set` sends all selected parts in one `$batch`. The main transfer flow chunks (50 records per `$batch`).
+- **Duplicated boilerplate in the older routes.** The generic routes use `resolveAccessToken` from `lib/server/ifsRoute.js`; the older per-entity routes still copy the token block.
+
+## 12. Multi-entity transfer and transaction log
+
+The New Migration wizard (`/new-migration`) moves the selected records of several entities from Source to Destination in dependency order. It keeps a **transaction log** of every record's outcome and hands the user an Excel file at the end.
+
+### Entity registry (`frontend/lib/entityRegistry.js`)
+
+Every entity is one entry. **To add an entity to the transfer, add an entry here.** Nothing else needs to change: the generic routes, the runner, the review UI and the Excel export all read from it.
+
+| Field | Meaning |
+|---|---|
+| `id` | Stable id. It's stored in migration history, so don't rename it. |
+| `label`, `description`, `group` | Display name, card text, and which section the card appears in (`mandatory` or `basic`). |
+| `projection`, `entitySet` | e.g. `PartHandling.svc`, `PartCatalogSet`. The GET goes to the entity set; the POST goes to the projection's `$batch`. |
+| `keyFields` | The fields that identify a record, e.g. `['Contract', 'PartNo']`. The log key is these values joined with a pipe (`S1 \| P-100`). |
+| `titleField` | The record title shown in the review list. |
+| `references` | Record-level parents: `[{ entity: 'site', fields: { Contract: 'Contract' } }]` (child field → parent key field). |
+| `dependsOn` | Entity-level prerequisites for the Select Entities check. Referenced entities are added automatically. |
+| `fields` | Optional POST allow-list (see `lib/migrationFields.js`). Without one, the source record is sent minus `@odata.*` and `Obj*`/`LuName`/`KeyRef` fields. |
+| `verified` | What has been confirmed against a real tenant: `'post'`, `'get'` or `null`. |
+
+**Only Master Part (`PartCatalogSet`, POST verified) and Sales Part (`SalesPartSet`, GET verified) have been checked against a real tenant.** Every other entry uses the standard IFS Cloud projection and entity-set names and their usual key fields. Check each one in your tenant's API Explorer, and add a `fields` allow-list wherever the create body is narrower than what the GET returns.
+
+### How a transfer runs (`frontend/lib/transferRunner.js`)
+
+1. The selected entities are ordered parents-first (`orderEntitiesForTransfer`).
+2. Each record of an entity is checked before anything is sent:
+   - **A key field is blank** → `Failed` ("Missing key field(s)").
+   - **The same key appears twice in the selection** → `Skipped` (duplicate).
+   - **A parent it references was in this transfer and isn't `Success` / `Already exists`** → `Skipped`, with the reason (e.g. "Company C02 failed"). Its own children are then skipped in turn.
+   - **A parent that wasn't in this transfer** is assumed to already exist in the destination. If it doesn't, IFS rejects the child and the child is logged as `Failed`.
+3. The records that pass are POSTed through `/api/ifs/batch` in chunks of 50 (one changeset per record, `odata.continue-on-error`). Each record's own HTTP answer is classified:
+   - `2xx` → `Success`
+   - `409`, or an error mentioning "already exists" / `.EXIST` / duplicate → `Already exists`. This counts as success for its children.
+   - Any other `4xx`/`5xx` → `Failed`, with the IFS message and error code.
+   - No identifiable answer → `Unconfirmed`. This counts as a failure for its children, because we can't tell whether the record exists.
+   - If the whole chunk is rejected (e.g. 401 twice, or IFS unreachable), every record in the chunk is `Failed`.
+4. If the cached destination token is rejected, the client drops it and retries the chunk once with a freshly minted token.
+5. "Cancel after current batch" logs every unsent record as `Skipped` ("Transfer cancelled").
+
+The loop runs in the browser, one short server call per chunk. That keeps progress live and keeps each call well under hosting (Vercel) function timeouts.
+
+### Transaction log (`frontend/lib/transactionLog.js`)
+
+One in-memory log per run: run id, both environments, start and finish times, and one entry per record (`entity`, `key`, `status`, `httpStatus`, `message`, `errorCode`, `skippedBecause`, the `payload` sent or that would have been sent, `timestamp`). It isn't persisted: only a summary per run goes into migration history (`localStorage`, last 25). **The Excel file is the permanent record.**
+
+### Excel export (`frontend/lib/transactionLogExcel.js`)
+
+Built in the browser with `exceljs` (loaded on demand) as `transfer-log-<timestamp>.xlsx`:
+
+- **Summary** sheet: the run details and counts per entity and status.
+- **One sheet per entity**: Status (colour-coded), Key, HTTP status, Message, Skipped because, Error code, Time, then every payload field, in source order. Failed and skipped rows carry their full payload, so they can be fixed and re-sent.
+
+### Not done yet
+
+- The Customer sub-items (Address, Contact, Communication Method) are selectable but not transferred; only the customer header record is.
+- There's no "retry failed only" button yet. The log has everything it would need (status + payload per record).
+- Only tested against a local mock IFS: ordering, the parent-failure skip chain, parent-not-in-run, already-exists, unconfirmed, chunking, the wizard UI and the Excel output. Not yet run against a real tenant.
