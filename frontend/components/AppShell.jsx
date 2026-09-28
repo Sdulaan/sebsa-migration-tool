@@ -34,10 +34,7 @@ export default function AppShell({ children }) {
             <DashboardOutlinedIcon fontSize="small" /> Dashboard
           </Link>
           <Link href="/new-migration" className={pathname === '/new-migration' ? 'active' : ''}>
-            <AddCircleOutlinedIcon fontSize="small" /> New Migration
-          </Link>
-          <Link href="/data-explorer" className={pathname === '/data-explorer' ? 'active' : ''}>
-            Data Explorer
+            <AddCircleOutlinedIcon fontSize="small" /> New Transfer
           </Link>
           <Link href="/history" className={pathname === '/history' ? 'active' : ''}>
             <HistoryIcon fontSize="small" /> Transfer History

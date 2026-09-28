@@ -101,7 +101,7 @@ export default function LiveDataView({ dataset }) {
         <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0, marginBottom: 18 }}>
           <button type="button" className="ghost" onClick={() => router.push('/new-migration')}>
             <ArrowBackOutlinedIcon fontSize="small" />
-            Back to migration
+            Back to transfer
           </button>
           <button type="button" className="secondary" onClick={load} disabled={loading}>
             <RefreshIcon fontSize="small" />
@@ -179,7 +179,7 @@ export default function LiveDataView({ dataset }) {
           <div className="actions">
             <button type="button" onClick={handleMigrateData} disabled={selectedIndices.size === 0}>
               <CloudUploadOutlinedIcon fontSize="small" />
-              Migrate data ({selectedIndices.size} selected)
+              Transfer data ({selectedIndices.size} selected)
             </button>
           </div>
         )}

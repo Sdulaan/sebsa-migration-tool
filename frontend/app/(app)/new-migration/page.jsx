@@ -19,6 +19,7 @@ import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import SellOutlinedIcon from '@mui/icons-material/SellOutlined'
 import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined'
+import ViewSidebarOutlinedIcon from '@mui/icons-material/ViewSidebarOutlined'
 import {
   SOURCE_ENV,
   DEST_ENV,
@@ -35,6 +36,7 @@ import {
   getHistory
 } from '../../../lib/migrationStore'
 import { AVAILABLE_ENTITIES, orderEntitiesForTransfer, recordKey } from '../../../lib/entityRegistry'
+import { reviewSubTabList, buildReviewSubTabs } from '../../../lib/reviewDetailMock'
 import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../lib/transactionLog'
 import { runTransfer } from '../../../lib/transferRunner'
 import { downloadTransactionLog } from '../../../lib/transactionLogExcel'
@@ -63,6 +65,159 @@ function recordTitle(entity, record) {
 
 const MANDATORY_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'mandatory')
 const BASIC_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'basic')
+
+// One mock form control for the detail column. Uncontrolled (defaultValue /
+// defaultChecked): the form is remounted via `key` when the selection changes,
+// so each field shows its new value without per-field state wiring.
+function ReviewFormField({ field }) {
+  return (
+    <div className="erp-field">
+      <label>{field.label}</label>
+      {field.type === 'select' ? (
+        <select defaultValue={field.value}>
+          {field.options.map((opt) => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+      ) : field.type === 'date' ? (
+        <input type="date" defaultValue={field.value} />
+      ) : field.type === 'toggle' ? (
+        <label className="erp-toggle">
+          <input type="checkbox" defaultChecked={Boolean(field.value)} />
+          <span className="erp-toggle-track"><span className="erp-toggle-thumb" /></span>
+        </label>
+      ) : (
+        <input type="text" defaultValue={field.value == null ? '' : String(field.value)} />
+      )}
+    </div>
+  )
+}
+
+// Columns 2 (record accordion) and 3 (detail form) of the Review step. Keyed
+// by entity id in the parent, so switching category resets the selection back
+// to the empty state. Sub-tabs are vertical items inside each expanded record
+// (no horizontal tabs on the detail side). The checkbox on each record row is
+// the transfer selection; the rest of the row toggles the accordion.
+function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRecord, onToggleSelectAll }) {
+  const [expandedRecordId, setExpandedRecordId] = useState(null)
+  const [selectedRecordId, setSelectedRecordId] = useState(null)
+  const [selectedSubTabId, setSelectedSubTabId] = useState(null)
+
+  const subTabList = reviewSubTabList(entity)
+  const selectedRecord = selectedRecordId != null ? records[selectedRecordId] : null
+  const subTabs = selectedRecord ? buildReviewSubTabs(entity, selectedRecord) : []
+  const selectedSubTab = subTabs.find((t) => t.tabId === selectedSubTabId) || null
+  const hasSelection = Boolean(selectedRecord && selectedSubTab)
+
+  function toggleExpand(index) {
+    setExpandedRecordId((prev) => (prev === index ? null : index))
+  }
+
+  function selectSubTab(recordIndex, subTabId) {
+    setSelectedRecordId(recordIndex)
+    setSelectedSubTabId(subTabId)
+  }
+
+  return (
+    <>
+      {/* Column 2 — record accordion */}
+      <div className="erp-records">
+        <div className="erp-records-head">
+          <span className="erp-records-title">{entity.label} Records</span>
+          <button type="button" className="secondary" onClick={onToggleSelectAll}>
+            {allSelected ? 'Deselect all' : 'Select all'}
+          </button>
+        </div>
+        <div className="erp-records-scroll">
+          {records.map((record, index) => {
+            const isExpanded = expandedRecordId === index
+            const isChecked = selectedIds?.has(index) || false
+            return (
+              <div className="erp-record" key={index}>
+                <div className={`erp-record-row ${isExpanded ? 'expanded' : ''}`}>
+                  <input
+                    type="checkbox"
+                    className="erp-record-check"
+                    checked={isChecked}
+                    onChange={() => onToggleRecord(index)}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="Select for transfer"
+                  />
+                  <button
+                    type="button"
+                    className="erp-record-toggle"
+                    onClick={() => toggleExpand(index)}
+                    aria-expanded={isExpanded}
+                  >
+                    <span className="erp-record-info">
+                      <strong>{recordTitle(entity, record)}</strong>
+                      <small>{entity.keyFields.map((key) => `${key}: ${record[key] ?? '—'}`).join(' · ')}</small>
+                    </span>
+                    <ExpandMoreIcon className={`erp-record-chevron ${isExpanded ? 'open' : ''}`} fontSize="small" />
+                  </button>
+                </div>
+
+                {isExpanded && (
+                  <div className="erp-subtabs">
+                    {subTabList.map((tab) => {
+                      const isActive = selectedRecordId === index && selectedSubTabId === tab.tabId
+                      return (
+                        <button
+                          type="button"
+                          key={tab.tabId}
+                          className={`erp-subtab ${isActive ? 'active' : ''}`}
+                          onClick={() => selectSubTab(index, tab.tabId)}
+                        >
+                          {tab.tabName}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Column 3 — detail form / empty state */}
+      <div className="erp-detail">
+        {!hasSelection ? (
+          <div className="erp-empty">
+            <ViewSidebarOutlinedIcon className="erp-empty-icon" />
+            <h3>Nothing selected</h3>
+            <p>Please select a record and a sub-tab from the middle panel to view details.</p>
+          </div>
+        ) : (
+          <>
+            <div className="erp-detail-header">
+              <div>
+                <div className="erp-breadcrumb">
+                  {entity.label} · {recordTitle(entity, selectedRecord)} · {selectedSubTab.tabName}
+                </div>
+                <h2 className="erp-detail-title">{recordTitle(entity, selectedRecord)}</h2>
+                <p className="erp-detail-sub">{recordKey(entity, selectedRecord) || '—'}</p>
+              </div>
+            </div>
+
+            <div className="erp-form" key={`${selectedRecordId}:${selectedSubTab.tabId}`}>
+              {selectedSubTab.sections.map((section) => (
+                <section className="erp-card" key={section.title}>
+                  <h4>{section.title}</h4>
+                  <div className="erp-grid">
+                    {section.fields.map((field) => (
+                      <ReviewFormField key={field.id} field={field} />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  )
+}
 
 export default function NewMigrationPage() {
   const router = useRouter()
@@ -220,7 +375,8 @@ export default function NewMigrationPage() {
       }
       const records = fetched[i].records
       result[id] = { records, total: records.length }
-      initialSelection[id] = new Set(records.map((_, index) => index))
+      // Records start UNCHECKED — the user ticks the ones to transfer.
+      initialSelection[id] = new Set()
       if (entity.subMenu) {
         initialSubItems[id] = {}
         records.forEach((_, index) => {
@@ -374,94 +530,38 @@ export default function NewMigrationPage() {
     if (fetchedIds.length === 0 || !displayEntity) return null
 
     return (
-      <>
-        <div className="panel config-panel">
-          <div className="config-layout">
-            <div className="config-sidebar">
-              {fetchedIds.map((id) => {
-                const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
-                const Icon = ENTITY_ICONS[id]
-                return (
-                  <button
-                    type="button"
-                    key={id}
-                    className={`config-nav-item ${displayEntityId === id ? 'active' : ''}`}
-                    onClick={() => setActiveEntityId(id)}
-                  >
-                    <Icon className="config-nav-icon" fontSize="small" />
-                    <span className="config-nav-label">{entity.label}</span>
-                    <span className="config-nav-count">{dataMap[id].total}</span>
-                  </button>
-                )
-              })}
-            </div>
+      <div className="erp-layout">
+        {/* Column 1 — category sidebar (fetched entities) */}
+        <aside className="erp-categories">
+          {fetchedIds.map((id) => {
+            const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
+            const Icon = ENTITY_ICONS[id]
+            return (
+              <button
+                type="button"
+                key={id}
+                className={`erp-cat-item ${displayEntityId === id ? 'active' : ''}`}
+                onClick={() => setActiveEntityId(id)}
+              >
+                {Icon && <Icon className="erp-cat-icon" fontSize="small" />}
+                <span className="erp-cat-label">{entity.label}</span>
+                <span className="erp-cat-count">{dataMap[id].total}</span>
+              </button>
+            )
+          })}
+        </aside>
 
-            <div className="config-content">
-              <div className="config-content-header">
-                <div>
-                  <h3>{displayEntity.label.toUpperCase()}</h3>
-                  <p className="config-content-sub">
-                    {displaySelectedIds?.size || 0} of {displayData.total} selected for transfer
-                  </p>
-                </div>
-                <button type="button" className="secondary" onClick={() => toggleSelectAllForEntity(displayEntityId)}>
-                  {displayAllSelected ? 'Deselect all' : 'Select all'}
-                </button>
-              </div>
-
-              <div className="record-list">
-                {displayData.records.map((r, recordId) => {
-                  const isChecked = displaySelectedIds?.has(recordId) || false
-                  const hasSubMenu = Boolean(displayEntity.subMenu)
-                  const isExpanded = expandedRecords.has(`${displayEntityId}:${recordId}`)
-                  const subItems = hasSubMenu ? selectedSubItems[displayEntityId]?.[recordId] : null
-
-                  return (
-                    <div className="record-group" key={recordId}>
-                      <div className="record-row">
-                        {hasSubMenu && (
-                          <button
-                            type="button"
-                            className={`record-expand ${isExpanded ? 'open' : ''}`}
-                            onClick={() => toggleExpand(displayEntityId, recordId)}
-                            aria-label="Toggle submenu"
-                          >
-                            <ExpandMoreIcon fontSize="small" />
-                          </button>
-                        )}
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleRecord(displayEntityId, recordId)}
-                        />
-                        <span className="record-info" onClick={() => toggleRecord(displayEntityId, recordId)}>
-                          <strong>{recordTitle(displayEntity, r)}</strong>
-                          <small>{displayEntity.keyFields.map((key) => `${key}: ${r[key] ?? '—'}`).join(' · ')}</small>
-                        </span>
-                      </div>
-
-                      {hasSubMenu && isExpanded && (
-                        <div className="record-submenu">
-                          {displayEntity.subMenu.map((item) => (
-                            <label className="submenu-row" key={item}>
-                              <input
-                                type="checkbox"
-                                checked={subItems?.has(item) || false}
-                                onChange={() => toggleSubItem(displayEntityId, recordId, item)}
-                              />
-                              <span>{item}</span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      </>
+        {/* Columns 2 & 3 — record accordion + detail form */}
+        <ReviewAccordion
+          key={displayEntityId}
+          entity={displayEntity}
+          records={displayData.records}
+          selectedIds={displaySelectedIds}
+          allSelected={displayAllSelected}
+          onToggleRecord={(index) => toggleRecord(displayEntityId, index)}
+          onToggleSelectAll={() => toggleSelectAllForEntity(displayEntityId)}
+        />
+      </div>
     )
   }
 
@@ -719,8 +819,8 @@ export default function NewMigrationPage() {
     <>
       <header>
         <div>
-          <span className="eyebrow">NEW MIGRATION</span>
-          <h1>Migrate data to IFS</h1>
+          <span className="eyebrow">NEW TRANSFER</span>
+          <h1>Transfer data to IFS</h1>
           <p>Configure the environments, select entities to transfer, review the data, then confirm the transfer.</p>
         </div>
       </header>
@@ -729,7 +829,7 @@ export default function NewMigrationPage() {
 
       {step === 0 && (
         <div className="panel">
-          <h2>Configure Migration</h2>
+          <h2>Configure Transfer</h2>
           <p className="login-sub" style={{ marginTop: -6 }}>Select the source and destination environments.</p>
 
           <div className="env-row">
