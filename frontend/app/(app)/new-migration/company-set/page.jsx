@@ -43,6 +43,12 @@ function CompanySetContent() {
   const [postUrl, setPostUrl] = useState(null)
   const [posting, setPosting] = useState(false)
   const [postResult, setPostResult] = useState(null)
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false)
+  // Set between "Migrate data" and the confirm dialog: which selected
+  // companies are new vs. already present in the destination (see
+  // handlePostClick — CreateNewCompany doesn't reliably fail on a duplicate,
+  // see the note on the confirm dialog).
+  const [pendingTransfer, setPendingTransfer] = useState(null) // { toCreate, alreadyExisting }
 
   async function load() {
     setLoading(true)
@@ -90,26 +96,85 @@ function CompanySetContent() {
   }
 
   // Migrating creates records in the destination environment, so it's gated
-  // behind a confirmation that names the exact URL being called.
-  function handlePostClick() {
+  // behind a confirmation that names the exact URL being called. Before that,
+  // check which selected companies already exist in the destination:
+  // CreateNewCompany does not reliably fail on a duplicate (a real run
+  // returned an apparent success for a company that already existed there),
+  // so duplicates are found here — by actually reading the destination — and
+  // never sent, rather than trusted to IFS's own response.
+  async function handlePostClick() {
     setPostResult(null)
+    const destConfig = getEnvironmentConfig(DEST_ENV)
+    let url
     try {
-      setPostUrl(buildCreateCompanyUrl(getEnvironmentConfig(DEST_ENV).baseUrl))
-      setConfirmOpen(true)
+      url = buildCreateCompanyUrl(destConfig.baseUrl)
     } catch {
       setPostResult({
         success: false,
         error: 'No Base URL configured for the destination environment yet — set one in "Configure destination environment".'
       })
+      return
     }
+    setPostUrl(url)
+
+    const toCreate = selectedCompanies()
+    setCheckingDuplicates(true)
+    const destCompanies = await fetchLiveCompanies(DEST_ENV, destConfig)
+    setCheckingDuplicates(false)
+
+    if (!destCompanies.success) {
+      // Can't verify — don't block the migrate on a failed safety check, but
+      // say so plainly rather than silently skipping it.
+      setPendingTransfer({ toCreate, alreadyExisting: [], destCheckError: destCompanies.error })
+      setConfirmOpen(true)
+      return
+    }
+
+    const existingCodes = new Set(
+      destCompanies.records.map((r) => String(r.Company ?? '').trim().toUpperCase()).filter(Boolean)
+    )
+    const alreadyExisting = toCreate.filter((c) => existingCodes.has(String(c.NewCompany ?? '').trim().toUpperCase()))
+    const newOnes = toCreate.filter((c) => !existingCodes.has(String(c.NewCompany ?? '').trim().toUpperCase()))
+    setPendingTransfer({ toCreate: newOnes, alreadyExisting, destCheckError: null })
+    setConfirmOpen(true)
   }
 
   async function handleConfirmPost() {
     setConfirmOpen(false)
+    const { toCreate, alreadyExisting } = pendingTransfer
+    const skipped = alreadyExisting.map((c) => ({
+      NewCompany: c.NewCompany,
+      error: 'Already exists in the destination — skipped without calling CreateNewCompany.'
+    }))
+
+    if (toCreate.length === 0) {
+      setPostResult({
+        success: true,
+        mode: 'none',
+        summary: { totalSubmitted: skipped.length, successful: 0, failed: skipped.length },
+        successful: [],
+        failed: skipped,
+        unconfirmed: []
+      })
+      return
+    }
+
     setPosting(true)
-    const posted = await postCompanies(DEST_ENV, getEnvironmentConfig(DEST_ENV), selectedCompanies())
+    const posted = await postCompanies(DEST_ENV, getEnvironmentConfig(DEST_ENV), toCreate)
     console.log('[CompanySet post] Result:', posted)
-    setPostResult(posted)
+    if (posted.success) {
+      setPostResult({
+        ...posted,
+        summary: {
+          ...posted.summary,
+          totalSubmitted: posted.summary.totalSubmitted + skipped.length,
+          failed: posted.summary.failed + skipped.length
+        },
+        failed: [...posted.failed, ...skipped]
+      })
+    } else {
+      setPostResult(posted)
+    }
     setPosting(false)
   }
 
@@ -208,9 +273,17 @@ function CompanySetContent() {
 
         {!loading && result?.success && records.length > 0 && (
           <div className="actions">
-            <button type="button" onClick={handlePostClick} disabled={selectedIndices.size === 0 || posting}>
+            <button
+              type="button"
+              onClick={handlePostClick}
+              disabled={selectedIndices.size === 0 || posting || checkingDuplicates}
+            >
               <CloudUploadOutlinedIcon fontSize="small" />
-              {posting ? 'Migrating…' : `Migrate data (${selectedIndices.size} selected)`}
+              {checkingDuplicates
+                ? 'Checking destination…'
+                : posting
+                ? 'Migrating…'
+                : `Migrate data (${selectedIndices.size} selected)`}
             </button>
           </div>
         )}
@@ -225,7 +298,11 @@ function CompanySetContent() {
         {postResult?.success && (
           <>
             <p style={{ marginTop: 16 }}>
-              {postResult.mode === 'batch' ? 'Sent as one $batch request. ' : 'Sent one request per company (the $batch endpoint didn’t accept it). '}
+              {postResult.mode === 'batch'
+                ? 'Sent as one $batch request. '
+                : postResult.mode === 'sequential'
+                ? 'Sent one request per company (the $batch endpoint didn’t accept it). '
+                : ''}
               {postResult.summary.totalSubmitted} submitted: {postResult.summary.successful} created,{' '}
               {postResult.summary.failed} failed
               {postResult.summary.unconfirmed ? `, ${postResult.summary.unconfirmed} unconfirmed.` : '.'}
@@ -259,14 +336,25 @@ function CompanySetContent() {
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>Migrate to destination environment?</DialogTitle>
         <DialogContent>
+          {pendingTransfer?.destCheckError && (
+            <div className="auth-banner warning" style={{ marginBottom: 12 }}>
+              <ErrorOutlineIcon fontSize="small" />
+              <span>Couldn’t check the destination for existing companies ({pendingTransfer.destCheckError}) — proceeding without duplicate detection.</span>
+            </div>
+          )}
           <p className="login-sub" style={{ marginTop: -4, wordBreak: 'break-all' }}>
-            This will create {selectedIndices.size} compan{selectedIndices.size === 1 ? 'y' : 'ies'} in the destination
-            environment by sending one CreateNewCompany request per company to {postUrl}.
+            {pendingTransfer?.toCreate.length > 0
+              ? `This will create ${pendingTransfer.toCreate.length} compan${pendingTransfer.toCreate.length === 1 ? 'y' : 'ies'} in the destination environment via ${postUrl}.`
+              : 'Nothing to create — every selected company already exists in the destination.'}
+            {pendingTransfer?.alreadyExisting.length > 0 &&
+              ` ${pendingTransfer.alreadyExisting.length} of the selected compan${pendingTransfer.alreadyExisting.length === 1 ? 'y' : 'ies'} already exist${pendingTransfer.alreadyExisting.length === 1 ? 's' : ''} in the destination and will be skipped.`}
           </p>
         </DialogContent>
         <DialogActions>
           <button type="button" className="ghost" onClick={() => setConfirmOpen(false)}>Cancel</button>
-          <button type="button" onClick={handleConfirmPost}>Migrate {selectedIndices.size}</button>
+          <button type="button" onClick={handleConfirmPost}>
+            {pendingTransfer?.toCreate.length > 0 ? `Migrate ${pendingTransfer.toCreate.length}` : 'Continue'}
+          </button>
         </DialogActions>
       </Dialog>
     </>
