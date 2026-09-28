@@ -95,9 +95,8 @@ function ReviewFormField({ field }) {
 
 // Columns 2 (record accordion) and 3 (detail form) of the Review step. Keyed
 // by entity id in the parent, so switching category resets the selection back
-// to the empty state. Sub-tabs are vertical items inside each expanded record
-// (no horizontal tabs on the detail side). The checkbox on each record row is
-// the transfer selection; the rest of the row toggles the accordion.
+// to the empty state. Sub-tabs are vertical items inside an explicitly
+// expanded record; checking a record selects its detail without opening them.
 function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRecord, onToggleSelectAll }) {
   const [expandedRecordId, setExpandedRecordId] = useState(null)
   const [selectedRecordId, setSelectedRecordId] = useState(null)
@@ -118,14 +117,14 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
     setSelectedSubTabId(subTabId)
   }
 
-  // Ticking a checkbox opens the detail view (expand the row + select its first
-  // sub-tab); unticking the currently-viewed record reverts to the empty state.
+  // Ticking a checkbox selects the detail view without expanding the row.
+  // The record button remains the explicit accordion toggle.
   function handleCheckboxChange(index) {
     const wasChecked = selectedIds?.has(index) || false
     onToggleRecord(index)
+    setExpandedRecordId(null)
     if (!wasChecked) {
       setSelectedRecordId(index)
-      setExpandedRecordId(index)
       setSelectedSubTabId(subTabList[0]?.tabId ?? null)
     } else if (selectedRecordId === index) {
       setSelectedRecordId(null)
