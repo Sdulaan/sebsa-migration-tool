@@ -42,7 +42,16 @@ const DEFINITIONS = [
     titleField: 'Name',
     references: [],
     dependsOn: [],
-    verified: null
+    // GET is this entity set, confirmed against a real environment. POST is
+    // NOT a plain $batch to CompanySet — a real create needs the
+    // CreateNewCompany assistant action (different fields, different
+    // endpoint entirely). transferRunner.js special-cases 'company' to
+    // postCompanyHeaderBatch instead of the generic postEntityBatch this
+    // `entitySet`/`fields` config implies; `fields` is left unset here
+    // because it isn't used for Company's POST at all. Sub-entities (Address,
+    // Tax Control, ...) are read-only in Review Data for now — see
+    // lib/companyReviewData.js — and are not part of the transfer yet.
+    verified: 'get'
   },
   {
     id: 'site',

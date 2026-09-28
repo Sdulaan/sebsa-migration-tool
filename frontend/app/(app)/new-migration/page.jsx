@@ -37,6 +37,7 @@ import {
 } from '../../../lib/migrationStore'
 import { AVAILABLE_ENTITIES, orderEntitiesForTransfer, recordKey } from '../../../lib/entityRegistry'
 import { reviewSubTabList, buildReviewSubTabs } from '../../../lib/reviewDetailMock'
+import { fetchCompanyReviewSubTabs, COMPANY_REVIEW_TABS } from '../../../lib/companyReviewData'
 import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../lib/transactionLog'
 import { runTransfer } from '../../../lib/transferRunner'
 import { downloadTransactionLog } from '../../../lib/transactionLogExcel'
@@ -101,12 +102,44 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
   const [expandedRecordId, setExpandedRecordId] = useState(null)
   const [selectedRecordId, setSelectedRecordId] = useState(null)
   const [selectedSubTabId, setSelectedSubTabId] = useState(null)
+  // Company only: its sub-tabs are real GET data (see companyReviewData.js),
+  // fetched for the whole record when it's selected — everything else still
+  // uses the instant mock from reviewDetailMock.js.
+  const [liveSubTabs, setLiveSubTabs] = useState(null)
+  const [liveLoading, setLiveLoading] = useState(false)
+  const [liveError, setLiveError] = useState(null)
 
-  const subTabList = reviewSubTabList(entity)
+  const isLiveEntity = entity.id === 'company'
+  // Company's tab list is fixed to match the real IFS Aurena page (see
+  // companyReviewData.js) — not the Excel-generated 24-tab schema
+  // reviewSubTabList() would otherwise show.
+  const subTabList = isLiveEntity ? COMPANY_REVIEW_TABS : reviewSubTabList(entity)
   const selectedRecord = selectedRecordId != null ? records[selectedRecordId] : null
-  const subTabs = selectedRecord ? buildReviewSubTabs(entity, selectedRecord) : []
+
+  useEffect(() => {
+    if (!isLiveEntity || !selectedRecord) {
+      setLiveSubTabs(null)
+      setLiveError(null)
+      return
+    }
+    let cancelled = false
+    setLiveLoading(true)
+    setLiveError(null)
+    fetchCompanyReviewSubTabs(selectedRecord).then((result) => {
+      if (cancelled) return
+      setLiveLoading(false)
+      if (result.success) setLiveSubTabs(result.subTabs)
+      else setLiveError(result.error)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLiveEntity, selectedRecordId])
+
+  const subTabs = isLiveEntity ? liveSubTabs || [] : selectedRecord ? buildReviewSubTabs(entity, selectedRecord) : []
   const selectedSubTab = subTabs.find((t) => t.tabId === selectedSubTabId) || null
-  const hasSelection = Boolean(selectedRecord && selectedSubTab)
+  const hasSelection = Boolean(selectedRecord && (selectedSubTab || (isLiveEntity && (liveLoading || liveError))))
 
   function toggleExpand(index) {
     setExpandedRecordId((prev) => (prev === index ? null : index))
@@ -207,25 +240,37 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
             <div className="erp-detail-header">
               <div>
                 <div className="erp-breadcrumb">
-                  {entity.label} · {recordTitle(entity, selectedRecord)} · {selectedSubTab.tabName}
+                  {entity.label} · {recordTitle(entity, selectedRecord)}
+                  {selectedSubTab ? ` · ${selectedSubTab.tabName}` : ''}
                 </div>
                 <h2 className="erp-detail-title">{recordTitle(entity, selectedRecord)}</h2>
                 <p className="erp-detail-sub">{recordKey(entity, selectedRecord) || '—'}</p>
               </div>
             </div>
 
-            <div className="erp-form" key={`${selectedRecordId}:${selectedSubTab.tabId}`}>
-              {selectedSubTab.sections.map((section) => (
-                <section className="erp-card" key={section.title}>
-                  <h4>{section.title}</h4>
-                  <div className="erp-grid">
-                    {section.fields.map((field) => (
-                      <ReviewFormField key={field.id} field={field} />
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
+            {isLiveEntity && liveLoading && <p className="field-hint">Fetching live data from IFS…</p>}
+
+            {isLiveEntity && !liveLoading && liveError && (
+              <div className="auth-banner error">
+                <ErrorOutlineIcon fontSize="small" />
+                <span>{liveError}</span>
+              </div>
+            )}
+
+            {selectedSubTab && (
+              <div className="erp-form" key={`${selectedRecordId}:${selectedSubTab.tabId}`}>
+                {selectedSubTab.sections.map((section, i) => (
+                  <section className="erp-card" key={`${section.title}-${i}`}>
+                    <h4>{section.title}</h4>
+                    <div className="erp-grid">
+                      {section.fields.map((field) => (
+                        <ReviewFormField key={field.id} field={field} />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -1017,6 +1062,15 @@ export default function NewMigrationPage() {
             >
               <CloudDownloadOutlinedIcon fontSize="small" />
               Get live data (PartCatalogSet)
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => router.push(`/new-migration/company-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (CompanySet)
             </button>
             <button onClick={() => setStep(1)} disabled={!canProceedConfig}>
               Next

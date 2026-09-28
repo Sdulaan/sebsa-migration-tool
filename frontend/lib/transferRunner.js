@@ -24,7 +24,20 @@ import {
   isParentSatisfied,
   isAlreadyExistsError
 } from './transactionLog'
-import { postEntityBatch } from './migrationStore'
+import { postEntityBatch, postCompanyHeaderBatch } from './migrationStore'
+
+// Company has a real, confirmed-working create flow (CreateNewCompany, header
+// fields only — see postCompanyHeaderBatch and its own duplicate check) that
+// is nothing like the generic "$batch POST to the entity set" every other
+// registry entity uses. Its sub-entities (Address, Tax Control, ...), shown
+// in Review Data, aren't sent anywhere yet.
+const CUSTOM_POSTERS = {
+  company: postCompanyHeaderBatch
+}
+
+function posterFor(entity) {
+  return CUSTOM_POSTERS[entity.id] || ((env, config, records) => postEntityBatch(entity.id, env, config, records))
+}
 
 export const DEFAULT_CHUNK_SIZE = 50
 
@@ -102,7 +115,7 @@ export async function runTransfer({
         break
       }
 
-      const res = await postEntityBatch(entity.id, destEnv, destConfig, chunk.map((c) => c.payload))
+      const res = await posterFor(entity)(destEnv, destConfig, chunk.map((c) => c.payload))
 
       if (!res.success) {
         // The batch as a whole was rejected before IFS looked at any record.
