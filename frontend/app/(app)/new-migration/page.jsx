@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Dialog from '@mui/material/Dialog'
 import DialogTitle from '@mui/material/DialogTitle'
@@ -16,14 +16,16 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined'
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
+import SellOutlinedIcon from '@mui/icons-material/SellOutlined'
+import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined'
 import {
-  AVAILABLE_ENTITIES,
   SOURCE_ENV,
   DEST_ENV,
   GRANT_TYPES,
   DEFAULT_ENV_CONFIG,
-  fetchEntitiesData,
-  runMigration,
+  fetchEntityRecords,
+  saveHistoryEntry,
   getEnvironmentConfigs,
   getEnvironmentConfig,
   saveEnvironmentConfig,
@@ -32,6 +34,10 @@ import {
   getSessionToken,
   getHistory
 } from '../../../lib/migrationStore'
+import { AVAILABLE_ENTITIES, orderEntitiesForTransfer, recordKey } from '../../../lib/entityRegistry'
+import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../lib/transactionLog'
+import { runTransfer } from '../../../lib/transferRunner'
+import { downloadTransactionLog } from '../../../lib/transactionLogExcel'
 import MigrationStepper from '../../../components/MigrationStepper'
 
 const STEPS = ['Configuration', 'Select Entities', 'Review Data', 'Transfer']
@@ -41,8 +47,18 @@ const ENTITY_ICONS = {
   site: RoomOutlinedIcon,
   customer: PersonOutlineOutlinedIcon,
   masterPart: Inventory2OutlinedIcon,
+  inventoryPart: CategoryOutlinedIcon,
+  salesPart: SellOutlinedIcon,
   supplier: LocalShippingOutlinedIcon,
   inventoryLocations: WarehouseOutlinedIcon
+}
+
+const STATUS_COLUMNS = ['SUCCESS', 'ALREADY_EXISTS', 'FAILED', 'SKIPPED', 'UNCONFIRMED']
+
+// Review-list title for a fetched record: its title field, else its key.
+function recordTitle(entity, record) {
+  const title = record[entity.titleField]
+  return title === null || title === undefined || title === '' ? recordKey(entity, record) : String(title)
 }
 
 const MANDATORY_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'mandatory')
@@ -68,7 +84,13 @@ export default function NewMigrationPage() {
   const [selectedSubItems, setSelectedSubItems] = useState({})
   const [expandedRecords, setExpandedRecords] = useState(new Set())
   const [activeEntityId, setActiveEntityId] = useState(null)
-  const [migrated, setMigrated] = useState(null)
+  const [fetchErrors, setFetchErrors] = useState({})
+  const [transferLog, setTransferLog] = useState(null)
+  const [transferProgress, setTransferProgress] = useState(null)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState('')
+  const [confirmTransferOpen, setConfirmTransferOpen] = useState(false)
+  const cancelRequested = useRef(false)
   const [transferredEntityIds, setTransferredEntityIds] = useState(new Set())
 
   const sameEnv = fromEnv && toEnv && fromEnv === toEnv
@@ -182,24 +204,36 @@ export default function NewMigrationPage() {
   async function fetchGroup(entityIds) {
     if (entityIds.length === 0) return
     setLoading(true)
-    const result = await fetchEntitiesData(entityIds)
+    // Records are identified in the review list by their index in the fetched
+    // list — source keys aren't guaranteed unique or even present.
+    const sourceConfig = getEnvironmentConfig(SOURCE_ENV)
+    const fetched = await Promise.all(entityIds.map((id) => fetchEntityRecords(id, SOURCE_ENV, sourceConfig)))
+    const result = {}
+    const errors = {}
     const initialSelection = {}
     const initialSubItems = {}
-    entityIds.forEach((id) => {
+    entityIds.forEach((id, i) => {
       const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
-      initialSelection[id] = new Set(result[id].records.map((r) => r[entity.idKey]))
+      if (!fetched[i].success) {
+        errors[id] = fetched[i].error
+        return
+      }
+      const records = fetched[i].records
+      result[id] = { records, total: records.length }
+      initialSelection[id] = new Set(records.map((_, index) => index))
       if (entity.subMenu) {
         initialSubItems[id] = {}
-        result[id].records.forEach((r) => {
-          initialSubItems[id][r[entity.idKey]] = new Set(entity.subMenu)
+        records.forEach((_, index) => {
+          initialSubItems[id][index] = new Set(entity.subMenu)
         })
       }
     })
+    setFetchErrors(errors)
     setDataMap((prev) => ({ ...prev, ...result }))
     setSelectedRecordIds((prev) => ({ ...prev, ...initialSelection }))
     setSelectedSubItems((prev) => ({ ...prev, ...initialSubItems }))
     setExpandedRecords(new Set())
-    setActiveEntityId(entityIds[0])
+    setActiveEntityId(entityIds.find((id) => result[id]) || null)
     setLoading(false)
   }
 
@@ -213,8 +247,7 @@ export default function NewMigrationPage() {
   }
 
   function toggleSelectAllForEntity(entityId) {
-    const entity = AVAILABLE_ENTITIES.find((e) => e.id === entityId)
-    const allIds = dataMap[entityId].records.map((r) => r[entity.idKey])
+    const allIds = dataMap[entityId].records.map((_, index) => index)
     const allSelected = selectedRecordIds[entityId]?.size === allIds.length
     setSelectedRecordIds((prev) => ({
       ...prev,
@@ -241,19 +274,73 @@ export default function NewMigrationPage() {
     })
   }
 
+  // Sends the selected records to the destination parents-first, logging
+  // every record's outcome; children of a parent that didn't make it are
+  // skipped (see lib/transferRunner.js).
   async function handleTransfer() {
+    const sourceConfig = getEnvironmentConfig(SOURCE_ENV)
+    const destConfig = getEnvironmentConfig(DEST_ENV)
+    const recordsByEntity = {}
+    selectedEntities.forEach((id) => {
+      const records = dataMap[id]?.records || []
+      recordsByEntity[id] = [...(selectedRecordIds[id] || [])].sort((a, b) => a - b).map((index) => records[index])
+    })
+    const entities = orderEntitiesForTransfer(selectedEntities).filter((e) => recordsByEntity[e.id]?.length > 0)
+    const log = createTransactionLog({
+      fromEnv,
+      toEnv,
+      sourceBaseUrl: sourceConfig.baseUrl,
+      destBaseUrl: destConfig.baseUrl,
+      entities
+    })
+
+    cancelRequested.current = false
     setLoading(true)
-    const breakdown = selectedEntities
-      .map((id) => {
-        const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
-        return { id, label: entity.label, total: selectedRecordIds[id]?.size || 0 }
-      })
-      .filter((e) => e.total > 0)
-    const entry = await runMigration(fromEnv, toEnv, breakdown)
-    setMigrated(entry)
+    setTransferLog(null)
+    setDownloadError('')
+    setTransferProgress({ summary: summarizeLog(log), entityId: entities[0]?.id, sent: 0, toSend: 0 })
+    setStep(3)
+
+    await runTransfer({
+      log,
+      entityIds: entities.map((e) => e.id),
+      recordsByEntity,
+      destEnv: DEST_ENV,
+      destConfig,
+      shouldCancel: () => cancelRequested.current,
+      onProgress: (progress) => setTransferProgress({ ...progress, summary: summarizeLog(log) })
+    })
+
+    const { entities: counts, totals } = summarizeLog(log)
+    saveHistoryEntry({
+      id: Number(log.runId),
+      fromEnv,
+      toEnv,
+      // An entity counts as transferred (for the "transferred" marker and the
+      // dashboard) by the records that are now in the destination.
+      entities: counts
+        .map((c) => ({ id: c.id, label: c.label, total: c.SUCCESS + c.ALREADY_EXISTS }))
+        .filter((c) => c.total > 0),
+      totalRecords: totals.SUCCESS,
+      counts: totals,
+      completedAt: log.finishedAt,
+      status: totals.total === totals.SUCCESS + totals.ALREADY_EXISTS ? 'Completed' : 'Completed with errors'
+    })
+    setTransferLog(log)
+    setTransferProgress(null)
     refreshTransferredEntities()
     setLoading(false)
-    setStep(3)
+  }
+
+  async function handleDownloadLog() {
+    setDownloading(true)
+    setDownloadError('')
+    try {
+      await downloadTransactionLog(transferLog)
+    } catch (err) {
+      setDownloadError(`Could not build the Excel file: ${err.message}`)
+    }
+    setDownloading(false)
   }
 
   const totalFetched = selectedEntities.reduce((sum, id) => sum + (dataMap[id]?.total || 0), 0)
@@ -269,7 +356,9 @@ export default function NewMigrationPage() {
     setSelectedSubItems({})
     setExpandedRecords(new Set())
     setActiveEntityId(null)
-    setMigrated(null)
+    setFetchErrors({})
+    setTransferLog(null)
+    setTransferProgress(null)
   }
 
   function renderEntityReview(groupEntities) {
@@ -321,8 +410,7 @@ export default function NewMigrationPage() {
               </div>
 
               <div className="record-list">
-                {displayData.records.map((r) => {
-                  const recordId = r[displayEntity.idKey]
+                {displayData.records.map((r, recordId) => {
                   const isChecked = displaySelectedIds?.has(recordId) || false
                   const hasSubMenu = Boolean(displayEntity.subMenu)
                   const isExpanded = expandedRecords.has(`${displayEntityId}:${recordId}`)
@@ -347,8 +435,8 @@ export default function NewMigrationPage() {
                           onChange={() => toggleRecord(displayEntityId, recordId)}
                         />
                         <span className="record-info" onClick={() => toggleRecord(displayEntityId, recordId)}>
-                          <strong>{r[displayEntity.rowPrimary]}</strong>
-                          <small>{displayEntity.rowSecondary.map((key) => r[key]).join(' · ')}</small>
+                          <strong>{recordTitle(displayEntity, r)}</strong>
+                          <small>{displayEntity.keyFields.map((key) => `${key}: ${r[key] ?? '—'}`).join(' · ')}</small>
                         </span>
                       </div>
 
@@ -497,17 +585,133 @@ export default function NewMigrationPage() {
           <div className="security-summary">
             <b>{totalSelected} of {totalFetched} records selected for transfer across {selectedEntities.length} {selectedEntities.length === 1 ? 'entity' : 'entities'}</b>
           </div>
+
+          {Object.entries(fetchErrors).map(([id, error]) => (
+            <div className="auth-banner error" key={id}>
+              <ErrorOutlineIcon fontSize="small" />
+              <span>{AVAILABLE_ENTITIES.find((e) => e.id === id).label}: {error}</span>
+            </div>
+          ))}
         </div>
 
         {renderEntityReview(AVAILABLE_ENTITIES)}
 
         <div className="actions">
           <button className="ghost" onClick={() => setStep(1)}>Back</button>
-          <button onClick={handleTransfer} disabled={loading || totalSelected === 0}>
+          <button onClick={() => setConfirmTransferOpen(true)} disabled={loading || totalSelected === 0}>
             {loading ? 'Transferring…' : `Transfer ${totalSelected} records to IFS`}
           </button>
         </div>
+
+        <Dialog open={confirmTransferOpen} onClose={() => setConfirmTransferOpen(false)} fullWidth maxWidth="sm">
+          <DialogTitle>Create records in the destination environment?</DialogTitle>
+          <DialogContent>
+            <p className="login-sub" style={{ marginTop: -4 }}>
+              This creates {totalSelected} record{totalSelected === 1 ? '' : 's'} in {toEnv}, one entity at a time in
+              this order: {orderEntitiesForTransfer(selectedEntities).map((e) => e.label).join(' → ')}. Records whose
+              parent record fails are skipped. You can download the full transaction log as Excel at the end.
+            </p>
+          </DialogContent>
+          <DialogActions>
+            <button type="button" className="ghost" onClick={() => setConfirmTransferOpen(false)}>Cancel</button>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmTransferOpen(false)
+                handleTransfer()
+              }}
+            >
+              Transfer {totalSelected}
+            </button>
+          </DialogActions>
+        </Dialog>
       </>
+    )
+  }
+
+  function renderStatusCounts(summary) {
+    return (
+      <div className="table-wrap" style={{ marginTop: 14 }}>
+        <table className="tx-table">
+          <thead>
+            <tr>
+              <th>Entity</th>
+              <th>Records</th>
+              {STATUS_COLUMNS.map((s) => <th key={s}>{TX_STATUS_LABELS[s]}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {summary.entities.map((e) => (
+              <tr key={e.id}>
+                <td>{e.label}</td>
+                <td>{e.total}</td>
+                {STATUS_COLUMNS.map((s) => (
+                  <td key={s} className={e[s] > 0 ? `tx-count tx-${s}` : 'tx-count'}>{e[s]}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  function renderTransferStep() {
+    if (transferProgress) {
+      const entity = AVAILABLE_ENTITIES.find((e) => e.id === transferProgress.entityId)
+      return (
+        <div className="panel">
+          <h2>Transferring…</h2>
+          <p className="login-sub" style={{ marginTop: -6 }}>
+            {entity ? `${entity.label}: ${transferProgress.sent} of ${transferProgress.toSend} sent` : 'Starting…'}
+          </p>
+          {renderStatusCounts(transferProgress.summary)}
+          <div className="actions">
+            <button type="button" className="ghost" onClick={() => { cancelRequested.current = true }}>
+              Cancel after current batch
+            </button>
+          </div>
+        </div>
+      )
+    }
+    if (!transferLog) return null
+
+    const summary = summarizeLog(transferLog)
+    const { totals } = summary
+    const clean = totals.total === totals.SUCCESS + totals.ALREADY_EXISTS
+    return (
+      <div className="panel">
+        <span className={`badge ${clean ? 'HIGH' : 'MEDIUM'}`} style={{ marginBottom: 10 }}>
+          {clean ? 'Completed' : 'Completed with errors'}
+        </span>
+        <h2>Transfer finished</h2>
+        <p>
+          {totals.SUCCESS} created, {totals.ALREADY_EXISTS} already existed, {totals.FAILED} failed,{' '}
+          {totals.SKIPPED} skipped and {totals.UNCONFIRMED} unconfirmed, out of {totals.total} records sent
+          from {transferLog.fromEnv} to {transferLog.toEnv}.
+        </p>
+        {renderStatusCounts(summary)}
+        {totals.UNCONFIRMED > 0 && (
+          <div className="auth-banner warning">
+            <ErrorOutlineIcon fontSize="small" />
+            <span>IFS gave no clear answer for {totals.UNCONFIRMED} record{totals.UNCONFIRMED === 1 ? '' : 's'}. Check the destination before retrying them.</span>
+          </div>
+        )}
+        {downloadError && (
+          <div className="auth-banner error">
+            <ErrorOutlineIcon fontSize="small" />
+            <span>{downloadError}</span>
+          </div>
+        )}
+        <div className="actions" style={{ justifyContent: 'flex-start' }}>
+          <button onClick={handleDownloadLog} disabled={downloading}>
+            <FileDownloadOutlinedIcon fontSize="small" />
+            {downloading ? 'Building Excel…' : 'Download transaction log (Excel)'}
+          </button>
+          <button className="secondary" onClick={() => router.push('/')}>Back to dashboard</button>
+          <button className="ghost" onClick={resetAll}>Start another transfer</button>
+        </div>
+      </div>
     )
   }
 
@@ -707,27 +911,7 @@ export default function NewMigrationPage() {
 
       {step === 2 && renderReviewDataStep()}
 
-      {step === 3 && migrated && (
-        <div className="panel result-panel">
-          <span className="badge HIGH" style={{ marginBottom: 10 }}>Completed</span>
-          <h2>Transfer complete</h2>
-          <p>
-            {migrated.totalRecords} records across {migrated.entities.length} {migrated.entities.length === 1 ? 'entity' : 'entities'} were
-            transferred from {migrated.fromEnv} to {migrated.toEnv} at {new Date(migrated.completedAt).toLocaleString()}.
-          </p>
-          <div className="history-meta" style={{ marginBottom: 6 }}>
-            {migrated.entities.map((e) => (
-              <span key={e.id}>{e.label}: {e.total}</span>
-            ))}
-          </div>
-          <div className="actions" style={{ justifyContent: 'flex-start' }}>
-            <button onClick={() => router.push('/')}>Back to dashboard</button>
-            <button className="secondary" onClick={resetAll}>
-              Start another transfer
-            </button>
-          </div>
-        </div>
-      )}
+      {step === 3 && renderTransferStep()}
     </>
   )
 }

@@ -72,7 +72,7 @@ export default function DashboardPage() {
                     <span>{new Date(h.completedAt).toLocaleString()}</span>
                   </div>
                 </div>
-                <span className="badge HIGH">{h.status}</span>
+                <span className={`badge ${h.status === 'Completed' ? 'HIGH' : 'MEDIUM'}`}>{h.status}</span>
               </div>
             ))}
           </div>
