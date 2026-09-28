@@ -96,9 +96,8 @@ function ReviewFormField({ field }) {
 
 // Columns 2 (record accordion) and 3 (detail form) of the Review step. Keyed
 // by entity id in the parent, so switching category resets the selection back
-// to the empty state. Sub-tabs are vertical items inside each expanded record
-// (no horizontal tabs on the detail side). The checkbox on each record row is
-// the transfer selection; the rest of the row toggles the accordion.
+// to the empty state. Sub-tabs are vertical items inside an explicitly
+// expanded record; checking a record selects its detail without opening them.
 function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRecord, onToggleSelectAll }) {
   const [expandedRecordId, setExpandedRecordId] = useState(null)
   const [selectedRecordId, setSelectedRecordId] = useState(null)
@@ -148,6 +147,21 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
     setSelectedSubTabId(subTabId)
   }
 
+  // Ticking a checkbox selects the detail view without expanding the row.
+  // The record button remains the explicit accordion toggle.
+  function handleCheckboxChange(index) {
+    const wasChecked = selectedIds?.has(index) || false
+    onToggleRecord(index)
+    setExpandedRecordId(null)
+    if (!wasChecked) {
+      setSelectedRecordId(index)
+      setSelectedSubTabId(subTabList[0]?.tabId ?? null)
+    } else if (selectedRecordId === index) {
+      setSelectedRecordId(null)
+      setSelectedSubTabId(null)
+    }
+  }
+
   return (
     <>
       {/* Column 2 — record accordion */}
@@ -169,7 +183,7 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
                     type="checkbox"
                     className="erp-record-check"
                     checked={isChecked}
-                    onChange={() => onToggleRecord(index)}
+                    onChange={() => handleCheckboxChange(index)}
                     onClick={(e) => e.stopPropagation()}
                     aria-label="Select for transfer"
                   />
@@ -215,7 +229,7 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
         {!hasSelection ? (
           <div className="erp-empty">
             <ViewSidebarOutlinedIcon className="erp-empty-icon" />
-            <h3>Nothing selected</h3>
+            <h3>Nothing Selected</h3>
             <p>Please select a record and a sub-tab from the middle panel to view details.</p>
           </div>
         ) : (
@@ -720,29 +734,33 @@ export default function NewMigrationPage() {
   function renderReviewDataStep() {
     return (
       <>
-        <div className="panel">
-          <h2>Review fetched data</h2>
-          <p className="login-sub" style={{ marginTop: -6 }}>{fromEnv} → {toEnv}</p>
+        <div className="review-screen">
+          <div className="panel review-screen-head">
+            <h2>Review fetched data</h2>
+            <p className="login-sub" style={{ marginTop: -6 }}>{fromEnv} → {toEnv}</p>
 
-          <div className="security-summary">
-            <b>{totalSelected} of {totalFetched} records selected for transfer across {selectedEntities.length} {selectedEntities.length === 1 ? 'entity' : 'entities'}</b>
+            <div className="security-summary">
+              <b>{totalSelected} of {totalFetched} records selected for transfer across {selectedEntities.length} {selectedEntities.length === 1 ? 'entity' : 'entities'}</b>
+            </div>
+
+            {Object.entries(fetchErrors).map(([id, error]) => (
+              <div className="auth-banner error" key={id}>
+                <ErrorOutlineIcon fontSize="small" />
+                <span>{AVAILABLE_ENTITIES.find((e) => e.id === id).label}: {error}</span>
+              </div>
+            ))}
           </div>
 
-          {Object.entries(fetchErrors).map(([id, error]) => (
-            <div className="auth-banner error" key={id}>
-              <ErrorOutlineIcon fontSize="small" />
-              <span>{AVAILABLE_ENTITIES.find((e) => e.id === id).label}: {error}</span>
-            </div>
-          ))}
-        </div>
+          <div className="review-screen-body">
+            {renderEntityReview(AVAILABLE_ENTITIES)}
+          </div>
 
-        {renderEntityReview(AVAILABLE_ENTITIES)}
-
-        <div className="actions">
-          <button className="ghost" onClick={() => setStep(1)}>Back</button>
-          <button onClick={() => setConfirmTransferOpen(true)} disabled={loading || totalSelected === 0}>
-            {loading ? 'Transferring…' : `Transfer ${totalSelected} records to IFS`}
-          </button>
+          <div className="actions review-screen-footer">
+            <button className="ghost" onClick={() => setStep(1)}>Back</button>
+            <button onClick={() => setConfirmTransferOpen(true)} disabled={loading || totalSelected === 0}>
+              {loading ? 'Transferring…' : `Transfer ${totalSelected} records to IFS`}
+            </button>
+          </div>
         </div>
 
         <Dialog open={confirmTransferOpen} onClose={() => setConfirmTransferOpen(false)} fullWidth maxWidth="sm">

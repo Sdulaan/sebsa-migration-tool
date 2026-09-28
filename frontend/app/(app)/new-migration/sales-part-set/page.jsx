@@ -110,7 +110,7 @@ function SalesPartSetContent() {
           </button>
         </div>
 
-        {loading && <p>Authorizing and fetching…</p>}
+        {loading && <p>Authorizing and Fetching…</p>}
 
         {!loading && result && !result.success && (
           <div className="auth-banner error">

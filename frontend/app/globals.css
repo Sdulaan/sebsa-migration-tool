@@ -63,6 +63,16 @@ header p{color:var(--text-muted);margin:0}
 .cards article,.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow)}
 .cards label{display:block;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
 .cards strong{font-size:24px;display:block;margin-top:8px;color:var(--text)}
+.stat-card{display:flex;flex-direction:column;justify-content:space-between}
+.stat-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.stat-card-head label{margin-top:4px}
+.stat-card-icon{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;flex-shrink:0}
+.stat-card-icon.tone-accent{background:var(--accent-soft);color:var(--accent)}
+.stat-card-icon.tone-success{background:var(--success-bg);color:var(--success-text)}
+.stat-card-icon.tone-danger{background:var(--danger-bg);color:var(--danger-text)}
+.stat-card-icon.tone-muted{background:var(--accent-soft);color:var(--text-muted)}
+.stat-card strong{font-size:30px;font-weight:700;line-height:1.1;margin-top:14px}
+.stat-card strong.stat-card-value-sm{font-size:17px;margin-top:16px}
 .panel{margin-bottom:18px}
 
 .section-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:6px}
@@ -344,6 +354,19 @@ td{vertical-align:top;padding:12px 10px;border-bottom:1px solid var(--border-sof
 .erp-empty h3{margin:0;color:var(--text-muted);font-size:16px}
 .erp-empty p{margin:0;font-size:13px;max-width:300px;line-height:1.5}
 
+/* ── Fixed full-screen layout for the Review step (no window scroll) ── */
+main:has(.review-screen){height:100vh;overflow:hidden;display:flex;flex-direction:column}
+main:has(.review-screen) > *:not(.review-screen){flex:0 0 auto}
+.review-screen{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:14px}
+.review-screen-head{flex:0 0 auto;margin:0}
+.review-screen-body{flex:1 1 auto;min-height:0;display:flex}
+.review-screen-body .erp-layout{flex:1 1 auto;min-height:0;height:100%;margin:0}
+.review-screen-body .erp-categories{height:100%;overflow-y:auto}
+.review-screen-body .erp-records{height:100%;min-height:0}
+.review-screen-body .erp-records-scroll{max-height:none}
+.review-screen-body .erp-detail{height:100%;max-height:none;overflow-y:auto}
+.review-screen-footer{flex:0 0 auto;margin:0}
+
 @media(max-width:900px){
   .erp-layout{grid-template-columns:1fr}
   .erp-categories{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--border)}
@@ -352,4 +375,12 @@ td{vertical-align:top;padding:12px 10px;border-bottom:1px solid var(--border-sof
   .erp-records{border-right:0;border-bottom:1px solid var(--border)}
   .erp-records-scroll,.erp-detail{max-height:none}
   .erp-detail-header{position:static}
+  /* Revert to normal document flow so small screens scroll the page */
+  main:has(.review-screen){height:auto;overflow:visible;display:block}
+  .review-screen{display:block}
+  .review-screen-body{display:block}
+  .review-screen-body .erp-layout,
+  .review-screen-body .erp-categories,
+  .review-screen-body .erp-records,
+  .review-screen-body .erp-detail{height:auto}
 }
