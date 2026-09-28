@@ -696,6 +696,15 @@ export default function NewMigrationPage() {
               <CloudDownloadOutlinedIcon fontSize="small" />
               Get live data (PartCatalogSet)
             </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => router.push(`/new-migration/company-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (CompanySet)
+            </button>
             <button onClick={() => setStep(1)} disabled={!canProceedConfig}>
               Next
             </button>

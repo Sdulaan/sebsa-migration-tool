@@ -139,6 +139,29 @@ export function buildPartHandlingBatchUrl(baseUrl) {
   return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/PartHandling.svc/$batch`
 }
 
+// CompanyHandling projection's CompanySet — see fetchLiveCompanies.
+export function buildCompanySetUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/CompanyHandling.svc/CompanySet`
+}
+
+// The "create new company" assistant action — a single unbound action call,
+// not an OData entity POST and not $batch. One request creates one company
+// synchronously (confirmed against a real environment: returns
+// { Company, Success: "TRUE" }). See postCompanies.
+export function buildCreateCompanyUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/CreateCompanyAssistantHandling.svc/CreateNewCompany`
+}
+
+// Same projection's $batch endpoint — tried first for speed (see
+// ifsCompanyBatch.js); falls back to one request per company if IFS doesn't
+// accept an action call inside $batch.
+export function buildCreateCompanyBatchUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/CreateCompanyAssistantHandling.svc/$batch`
+}
+
 // Calls our own /api route (server-side) so the OAuth2 client secret never
 // reaches the browser bundle and the request isn't blocked by CORS. Reuses
 // the session token from a prior "Test connection" when one is still valid,
@@ -241,6 +264,78 @@ export async function postPartCatalogParts(env, config, parts) {
   }
 }
 
+// Runs the authenticated GET against CompanySet using the given environment's
+// saved authorization. Same shape as fetchLiveSalesParts.
+export async function fetchLiveCompanies(env, config) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure source environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/company-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return { success: true, records: body.records || [] }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Creates the given companies via the CreateNewCompany assistant action,
+// authorized by the given environment (the destination). Unlike PartCatalog,
+// this endpoint is one request per company (no $batch) — every company gets
+// a plain successful/failed result, no "unconfirmed" bucket.
+export async function postCompanies(env, config, companies) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure destination environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/company-set/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        records: companies,
+        // Always include `config`, even with a cached token: creating a
+        // company is slow enough (real DB work, several seconds each) that
+        // a large batch can outlive the token's TTL, and the route needs
+        // `config` to mint a fresh one mid-batch rather than aborting.
+        ...(cached ? { accessToken: cached.accessToken } : {}),
+        config
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return {
+      success: true,
+      url: body.url,
+      mode: body.mode,
+      summary: body.summary,
+      successful: body.successful,
+      failed: body.failed,
+      unconfirmed: body.unconfirmed || []
+    }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
 // IFS OData responses carry internal/technical bookkeeping fields alongside
 // the real business data (row versioning, Lu metadata, etc.) — not meaningful
 // to show in the UI, so they're filtered out before display.
@@ -323,6 +418,51 @@ export function buildPartCatalogMigrationPayload(records) {
       if (key in record) picked[key] = record[key]
     })
     return picked
+  })
+}
+
+// CreateNewCompany takes wizard fields a plain CompanySet record doesn't
+// have (TemplateId, fiscal year setup, calendar method, ...) — these are
+// fixed for every company this app creates, taken from a known-good sample
+// request. Only the company's own identity/locale fields are read from the
+// source record.
+const COMPANY_CREATION_DEFAULTS = {
+  CreateAsTemplateCompany: false,
+  CreateAsMasterCompany: false,
+  SourceCompany: '',
+  TemplateId: 'STD-PT',
+  StartMonth: 1,
+  NumberOfYears: 12,
+  UseVouNoPeriod: false,
+  ParallelAccCurrency: 'USD',
+  LogicalAccTypesList: '',
+  CodePart: '',
+  LanguageCodes: 'en^sv^',
+  CreateFrom: 'Template',
+  CalenderCreationMethod: 'UserDefined',
+  ParallelCurBase: 'TransactionCurrency'
+}
+
+// Best-effort field names on CompanySet (Company, Name, Country,
+// CurrencyCode, DefaultLanguage) — not yet verified against a real
+// CompanySet response. Check the fetched records on the live-data page and
+// adjust these if the actual field names differ.
+export function buildCompanyMigrationPayload(records) {
+  const year = new Date().getFullYear()
+  return records.map((record) => {
+    const name = record.Name ?? record.CompanyName ?? record.Company ?? ''
+    return {
+      NewCompany: record.Company ?? '',
+      NewCompanyName: name,
+      ...COMPANY_CREATION_DEFAULTS,
+      AccYear: year,
+      StartYear: year,
+      ValidFrom: `${year}-01-01`,
+      CurrencyCode: record.CurrencyCode ?? '',
+      DefaultLanguage: record.DefaultLanguage ?? record.Language ?? 'en',
+      Country: record.Country ?? '',
+      InternalName: name
+    }
   })
 }
 
