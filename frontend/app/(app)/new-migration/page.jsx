@@ -37,7 +37,7 @@ import {
 } from '../../../lib/migrationStore'
 import { AVAILABLE_ENTITIES, orderEntitiesForTransfer, recordKey } from '../../../lib/entityRegistry'
 import { reviewSubTabList, buildReviewSubTabs } from '../../../lib/reviewDetailMock'
-import { fetchCompanyReviewSubTabs } from '../../../lib/companyReviewData'
+import { fetchCompanyReviewSubTabs, COMPANY_REVIEW_TABS } from '../../../lib/companyReviewData'
 import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../lib/transactionLog'
 import { runTransfer } from '../../../lib/transferRunner'
 import { downloadTransactionLog } from '../../../lib/transactionLogExcel'
@@ -110,7 +110,10 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
   const [liveError, setLiveError] = useState(null)
 
   const isLiveEntity = entity.id === 'company'
-  const subTabList = reviewSubTabList(entity)
+  // Company's tab list is fixed to match the real IFS Aurena page (see
+  // companyReviewData.js) — not the Excel-generated 24-tab schema
+  // reviewSubTabList() would otherwise show.
+  const subTabList = isLiveEntity ? COMPANY_REVIEW_TABS : reviewSubTabList(entity)
   const selectedRecord = selectedRecordId != null ? records[selectedRecordId] : null
 
   useEffect(() => {

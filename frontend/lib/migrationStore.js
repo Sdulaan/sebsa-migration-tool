@@ -407,7 +407,7 @@ export async function fetchLiveCompanies(env, config) {
 // authorized by the given environment (the destination). Tries $batch first
 // (fast, one HTTP request); falls back to one request per company when IFS
 // doesn't accept the action inside $batch — see company-set/create/route.js.
-export async function postCompanies(env, config, companies) {
+export async function postCompanies(env, config, companies, { forceSequential = false } = {}) {
   const cached = env ? getSessionToken(env) : null
   if (!config?.baseUrl) {
     return { success: false, error: 'This environment has no Base URL configured — set one in "Configure destination environment".' }
@@ -419,6 +419,7 @@ export async function postCompanies(env, config, companies) {
       body: JSON.stringify({
         baseUrl: config.baseUrl,
         records: companies,
+        forceSequential,
         // Always include `config`, even with a cached token: creating a
         // company is slow enough (real DB work, several seconds each) that
         // the sequential fallback can outlive the token's TTL, and the route
@@ -487,6 +488,13 @@ export async function fetchCompanySubEntity(env, config, company, tabId, address
 // page) since CreateNewCompany does not reliably fail on its own when a
 // company already exists — see postCompanies.
 //
+// Forces the sequential path (see postCompanies / company-set/create/route.js):
+// $batch's multipart response can come back with none of its per-company
+// parts matched, which reads as "unconfirmed" for every record even on a
+// clean run — confirmed against a real environment. Sequential always gets a
+// definite JSON body per company, so every record ends up SUCCESS or FAILED,
+// never UNCONFIRMED.
+//
 // `records` are raw CompanySet records (as the transfer runner passes them,
 // already stripped of system fields by buildEntityPayload). Returns
 // `{ success, results }` with one result per input record, in order —
@@ -506,7 +514,11 @@ export async function postCompanyHeaderBatch(env, config, records) {
   payloads.forEach((payload, i) => {
     const code = String(payload.NewCompany ?? '').trim().toUpperCase()
     if (existingCodes && code && existingCodes.has(code)) {
-      results[i] = { httpStatus: null, error: 'Already exists in the destination.', errorCode: null }
+      // httpStatus 409 (rather than null) so the transaction log classifies
+      // this as ALREADY_EXISTS, not UNCONFIRMED — see isAlreadyExistsError in
+      // transactionLog.js, and classify() in transferRunner.js, which only
+      // consults the error message once httpStatus is a real failing status.
+      results[i] = { httpStatus: 409, error: 'Already exists in the destination (found via a source-vs-destination check).', errorCode: null }
     } else {
       toPost.push(payload)
       toPostIndices.push(i)
@@ -515,7 +527,7 @@ export async function postCompanyHeaderBatch(env, config, records) {
 
   if (toPost.length === 0) return { success: true, results }
 
-  const posted = await postCompanies(env, config, toPost)
+  const posted = await postCompanies(env, config, toPost, { forceSequential: true })
   if (!posted.success) return posted
 
   toPostIndices.forEach((recordIndex, i) => {

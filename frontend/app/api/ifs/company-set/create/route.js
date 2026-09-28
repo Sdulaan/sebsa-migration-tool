@@ -56,8 +56,17 @@ export async function POST(request) {
     }
   }
 
-  const batchResponse = await tryBatch(companies, accessToken, body?.baseUrl, createUrl, token)
-  if (batchResponse) return batchResponse
+  // The Transfer step (transferRunner.js, via postCompanyHeaderBatch) asks
+  // for sequential explicitly: $batch's multipart response can come back
+  // with none of its per-company parts matched (seen against a real
+  // environment — every company landed as "unconfirmed", not a single
+  // success or failure), which the demo can't afford. Sequential always
+  // gets a definite JSON body per company, so it can't produce "unconfirmed".
+  // The standalone CompanySet page still tries $batch first, unaffected.
+  if (!body?.forceSequential) {
+    const batchResponse = await tryBatch(companies, accessToken, body?.baseUrl, createUrl, token)
+    if (batchResponse) return batchResponse
+  }
 
   return runSequential(companies, accessToken, config, createUrl, token)
 }
