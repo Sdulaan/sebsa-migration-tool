@@ -28,6 +28,7 @@ export default function AppShell({ children }) {
         <nav>
           <Link href="/" className={pathname === '/' ? 'active' : ''}>Dashboard</Link>
           <Link href="/new-migration" className={pathname === '/new-migration' ? 'active' : ''}>New Migration</Link>
+          <Link href="/data-explorer" className={pathname === '/data-explorer' ? 'active' : ''}>Data Explorer</Link>
         </nav>
         <div className="notice">
           <div className="notice-text">

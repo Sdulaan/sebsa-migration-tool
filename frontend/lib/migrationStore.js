@@ -8,6 +8,7 @@ const SESSION_TOKEN_KEY = 'sebsa_ifs_session_tokens'
 // Connection settings are stored per role — there is no user-entered environment name.
 export const SOURCE_ENV = 'Source'
 export const DEST_ENV = 'Destination'
+export const ENVIRONMENTS = [SOURCE_ENV, DEST_ENV]
 
 // IFS Cloud REST APIs (projections) are called with an OAuth2 bearer token.
 // The token is obtained from the IFS Identity Provider's token endpoint (the
@@ -156,6 +157,50 @@ export async function fetchLiveSalesParts(env, config) {
   }
   try {
     const res = await fetch('/api/ifs/sales-part-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return { success: true, records: body.records || [] }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+export const LIVE_DATASETS = {
+  salesPart: {
+    title: 'SalesPartSet',
+    endpoint: '/main/ifsapplications/projection/v1/SalesPartHandling.svc/SalesPartSet',
+    apiRoute: '/api/ifs/sales-part-set'
+  },
+  personGroup: {
+    title: 'DocumentGroupSet',
+    endpoint: '/main/ifsapplications/projection/v1/PersonGroupHandling.svc/DocumentGroupSet',
+    apiRoute: '/api/ifs/person-group-set'
+  }
+}
+
+export function buildLiveDataUrl(baseUrl, dataset) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}${dataset.endpoint}`
+}
+
+export async function fetchLiveData(dataset, env, config) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured.' }
+  }
+  try {
+    const res = await fetch(dataset.apiRoute, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
