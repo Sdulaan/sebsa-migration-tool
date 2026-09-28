@@ -167,6 +167,37 @@ export function buildCreateCompanyBatchUrl(baseUrl) {
   return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/CreateCompanyAssistantHandling.svc/$batch`
 }
 
+// Company sub-entities, read via navigation properties off CompanySet — see
+// "REST APIs.xlsx" (Company sheet). Confirmed by matching each tab's field
+// names (lib/erpEntitySchema.js) against the sheet's sample payloads, not by
+// calling a real tenant. A few are scoped to one specific address (an
+// AddressId, not just the company code) — see COMPANY_SUB_ENTITY_NEEDS_ADDRESS.
+const COMPANY_SUB_ENTITY_PATHS = {
+  address: (company) => `CompanySet(Company='${company}')/CompanyAddresses`,
+  messageSetup: (company) => `CompanySet(Company='${company}')/MessageSetups`,
+  invoice: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoDefInvTypes`,
+  payment: (company) => `CompanySet(Company='${company}')/CompanyPayments`,
+  communicationMethods: (company, addressId) =>
+    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/AddressCommunicationMethods`,
+  taxControl: (company, addressId) =>
+    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/TaxExempArray`,
+  supplyChain: (company, addressId) =>
+    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/CompanyAddressSupplyChainInfoArray`
+}
+
+export const COMPANY_SUB_ENTITY_NEEDS_ADDRESS = new Set(['communicationMethods', 'taxControl', 'supplyChain'])
+
+export function buildCompanySubEntityUrl(baseUrl, company, tabId, addressId) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  if (!company) throw new Error('Company code is required.')
+  const build = COMPANY_SUB_ENTITY_PATHS[tabId]
+  if (!build) throw new Error(`Unknown company sub-entity tab "${tabId}".`)
+  if (COMPANY_SUB_ENTITY_NEEDS_ADDRESS.has(tabId) && !addressId) {
+    throw new Error('An address is required to fetch this sub-entity.')
+  }
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/CompanyHandling.svc/${build(company, addressId)}`
+}
+
 // Calls our own /api route (server-side) so the OAuth2 client secret never
 // reaches the browser bundle and the request isn't blocked by CORS. Reuses
 // the session token from a prior "Test connection" when one is still valid,
@@ -383,6 +414,93 @@ export async function postCompanies(env, config, companies) {
   } catch (err) {
     return { success: false, error: err.message }
   }
+}
+
+// Runs the authenticated GET against one company sub-entity (a nav property
+// off CompanySet — see COMPANY_SUB_ENTITY_PATHS) for the Review step's real
+// data. Read-only: nothing built from this is ever sent back to IFS yet.
+export async function fetchCompanySubEntity(env, config, company, tabId, addressId) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure source environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/company-set/sub-entity', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        company,
+        tabId,
+        addressId,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return { success: true, records: body.records || [] }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Used by the Transfer step for the "company" entity (see transferRunner.js),
+// in place of the generic postEntityBatch: sends only the header — via the
+// real, confirmed-working CreateNewCompany flow, never a plain $batch POST to
+// CompanySet — and never the sub-entities shown in Review Data. Also does the
+// destination duplicate check here (not just on the standalone CompanySet
+// page) since CreateNewCompany does not reliably fail on its own when a
+// company already exists — see postCompanies.
+//
+// `records` are raw CompanySet records (as the transfer runner passes them,
+// already stripped of system fields by buildEntityPayload). Returns
+// `{ success, results }` with one result per input record, in order —
+// the shape lib/transferRunner.js expects from any entity poster.
+export async function postCompanyHeaderBatch(env, config, records) {
+  const destCompanies = await fetchLiveCompanies(env, config)
+  // Couldn't check — don't block the transfer on a failed safety check.
+  const existingCodes = destCompanies.success
+    ? new Set(destCompanies.records.map((r) => String(r.Company ?? '').trim().toUpperCase()))
+    : null
+
+  const payloads = buildCompanyMigrationPayload(records)
+  const results = new Array(records.length).fill(null)
+  const toPost = []
+  const toPostIndices = []
+
+  payloads.forEach((payload, i) => {
+    const code = String(payload.NewCompany ?? '').trim().toUpperCase()
+    if (existingCodes && code && existingCodes.has(code)) {
+      results[i] = { httpStatus: null, error: 'Already exists in the destination.', errorCode: null }
+    } else {
+      toPost.push(payload)
+      toPostIndices.push(i)
+    }
+  })
+
+  if (toPost.length === 0) return { success: true, results }
+
+  const posted = await postCompanies(env, config, toPost)
+  if (!posted.success) return posted
+
+  toPostIndices.forEach((recordIndex, i) => {
+    const code = String(toPost[i].NewCompany ?? '').trim().toUpperCase()
+    const ok = posted.successful.find((s) => String(s.NewCompany ?? '').trim().toUpperCase() === code)
+    if (ok) {
+      results[recordIndex] = { httpStatus: ok.status, error: null, errorCode: null }
+      return
+    }
+    const fail = posted.failed.find((f) => String(f.NewCompany ?? '').trim().toUpperCase() === code)
+    results[recordIndex] = fail
+      ? { httpStatus: fail.status ?? null, error: fail.error, errorCode: null }
+      : { httpStatus: null, error: 'No identifiable individual response', errorCode: null }
+  })
+
+  return { success: true, results }
 }
 
 // Calls one of the generic /api/ifs routes for an environment, reusing its
