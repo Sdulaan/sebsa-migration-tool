@@ -137,7 +137,7 @@ function PartCatalogSetContent() {
         <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0, marginBottom: 18 }}>
           <button type="button" className="ghost" onClick={() => router.push('/new-migration')}>
             <ArrowBackOutlinedIcon fontSize="small" />
-            Back to migration
+            Back to transfer
           </button>
           <button type="button" className="secondary" onClick={load} disabled={loading}>
             <RefreshIcon fontSize="small" />
@@ -215,7 +215,7 @@ function PartCatalogSetContent() {
           <div className="actions">
             <button type="button" onClick={handlePostClick} disabled={selectedIndices.size === 0 || posting}>
               <CloudUploadOutlinedIcon fontSize="small" />
-              {posting ? 'Migrating…' : `Migrate data (${selectedIndices.size} selected)`}
+              {posting ? 'Transferring…' : `Transfer data (${selectedIndices.size} selected)`}
             </button>
           </div>
         )}
@@ -257,7 +257,7 @@ function PartCatalogSetContent() {
       </div>
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Migrate to destination environment?</DialogTitle>
+        <DialogTitle>Transfer to destination environment?</DialogTitle>
         <DialogContent>
           <p className="login-sub" style={{ marginTop: -4, wordBreak: 'break-all' }}>
             This will create {selectedIndices.size} part{selectedIndices.size === 1 ? '' : 's'} in the destination
@@ -266,7 +266,7 @@ function PartCatalogSetContent() {
         </DialogContent>
         <DialogActions>
           <button type="button" className="ghost" onClick={() => setConfirmOpen(false)}>Cancel</button>
-          <button type="button" onClick={handleConfirmPost}>Migrate {selectedIndices.size}</button>
+          <button type="button" onClick={handleConfirmPost}>Transfer {selectedIndices.size}</button>
         </DialogActions>
       </Dialog>
     </>

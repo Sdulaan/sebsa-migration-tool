@@ -20,14 +20,14 @@ export default function DashboardPage() {
       <header>
         <div>
           <span className="eyebrow">DASHBOARD</span>
-          <h1>IFS data migration</h1>
-          <p>Configure environments, fetch entity data for review, then migrate it into IFS.</p>
+          <h1>IFS data transfer</h1>
+          <p>Configure environments, fetch entity data for review, then transfer it into IFS.</p>
         </div>
-        <Link href="/new-migration" className="button">Start new migration</Link>
+        <Link href="/new-migration" className="button">Start new transfer</Link>
       </header>
 
       <div className="banner">
-        <b>Candidate data, not automatic loading.</b> Data is fetched for review; migration only runs when you confirm it.
+        <b>Candidate data, not automatic loading.</b> Data is fetched for review; transfer only runs when you confirm it.
       </div>
 
       <div className="cards">
@@ -36,7 +36,7 @@ export default function DashboardPage() {
           <strong style={{ fontSize: 18 }}>healthy</strong>
         </article>
         <article>
-          <label>TOTAL MIGRATIONS</label>
+          <label>TOTAL TRANSFERS</label>
           <strong>{totalMigrations}</strong>
         </article>
         <article>
@@ -44,7 +44,7 @@ export default function DashboardPage() {
           <strong>{totalRecords}</strong>
         </article>
         <article>
-          <label>LAST MIGRATION</label>
+          <label>LAST TRANSFER</label>
           <strong style={{ fontSize: 15 }}>{last ? new Date(last.completedAt).toLocaleDateString() : '—'}</strong>
         </article>
       </div>
@@ -53,16 +53,16 @@ export default function DashboardPage() {
         <div className="section-heading">
           <div>
             <span className="eyebrow">HISTORY</span>
-            <h2>Recent migrations</h2>
+            <h2>Recent transfers</h2>
           </div>
         </div>
 
         {history.length === 0 ? (
-          <div className="empty">No migrations yet. Start your first one above.</div>
+          <div className="empty">No transfers yet. Start your first one above.</div>
         ) : (
           <div className="history-list">
-            {history.map((h) => (
-              <div className="history-row" key={h.id}>
+            {history.slice(0, 5).map((h) => (
+              <Link className="history-row history-row-link" href="/history" key={h.id}>
                 <div>
                   <h3 style={{ margin: 0, fontSize: 14 }}>{h.fromEnv} → {h.toEnv}</h3>
                   <div className="history-meta">
@@ -72,8 +72,8 @@ export default function DashboardPage() {
                     <span>{new Date(h.completedAt).toLocaleString()}</span>
                   </div>
                 </div>
-                <span className="badge HIGH">{h.status}</span>
-              </div>
+                <span className={`badge ${h.status === 'Completed' ? 'HIGH' : 'MEDIUM'}`}>{h.status}</span>
+              </Link>
             ))}
           </div>
         )}

@@ -1,3 +1,6 @@
+import { SALES_PART_MIGRATION_FIELDS, PART_CATALOG_MIGRATION_FIELDS } from './migrationFields'
+
+export { SALES_PART_MIGRATION_FIELDS, PART_CATALOG_MIGRATION_FIELDS }
 const HISTORY_KEY = 'sebsa_ifs_migration_history'
 const ENV_CONFIG_KEY = 'sebsa_ifs_env_config'
 const SESSION_TOKEN_KEY = 'sebsa_ifs_session_tokens'
@@ -5,6 +8,7 @@ const SESSION_TOKEN_KEY = 'sebsa_ifs_session_tokens'
 // Connection settings are stored per role — there is no user-entered environment name.
 export const SOURCE_ENV = 'Source'
 export const DEST_ENV = 'Destination'
+export const ENVIRONMENTS = [SOURCE_ENV, DEST_ENV]
 
 // IFS Cloud REST APIs (projections) are called with an OAuth2 bearer token.
 // The token is obtained from the IFS Identity Provider's token endpoint (the
@@ -146,9 +150,10 @@ export function buildCompanySetUrl(baseUrl) {
 }
 
 // The "create new company" assistant action — a single unbound action call,
-// not an OData entity POST and not $batch. One request creates one company
-// synchronously (confirmed against a real environment: returns
-// { Company, Success: "TRUE" }). See postCompanies.
+// not an OData entity POST. One request creates one company synchronously
+// (confirmed against a real environment: returns { Company, Success }, where
+// Success is not just "TRUE" — see postCompanies). See buildCreateCompanyBatchUrl
+// for the faster $batch path tried first.
 export function buildCreateCompanyUrl(baseUrl) {
   if (!baseUrl) throw new Error('Base URL is required.')
   return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/CreateCompanyAssistantHandling.svc/CreateNewCompany`
@@ -176,6 +181,50 @@ export async function fetchLiveSalesParts(env, config) {
   }
   try {
     const res = await fetch('/api/ifs/sales-part-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return { success: true, records: body.records || [] }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+export const LIVE_DATASETS = {
+  salesPart: {
+    title: 'SalesPartSet',
+    endpoint: '/main/ifsapplications/projection/v1/SalesPartHandling.svc/SalesPartSet',
+    apiRoute: '/api/ifs/sales-part-set'
+  },
+  personGroup: {
+    title: 'DocumentGroupSet',
+    endpoint: '/main/ifsapplications/projection/v1/PersonGroupHandling.svc/DocumentGroupSet',
+    apiRoute: '/api/ifs/person-group-set'
+  }
+}
+
+export function buildLiveDataUrl(baseUrl, dataset) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}${dataset.endpoint}`
+}
+
+export async function fetchLiveData(dataset, env, config) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured.' }
+  }
+  try {
+    const res = await fetch(dataset.apiRoute, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -293,9 +342,9 @@ export async function fetchLiveCompanies(env, config) {
 }
 
 // Creates the given companies via the CreateNewCompany assistant action,
-// authorized by the given environment (the destination). Unlike PartCatalog,
-// this endpoint is one request per company (no $batch) — every company gets
-// a plain successful/failed result, no "unconfirmed" bucket.
+// authorized by the given environment (the destination). Tries $batch first
+// (fast, one HTTP request); falls back to one request per company when IFS
+// doesn't accept the action inside $batch — see company-set/create/route.js.
 export async function postCompanies(env, config, companies) {
   const cached = env ? getSessionToken(env) : null
   if (!config?.baseUrl) {
@@ -310,8 +359,8 @@ export async function postCompanies(env, config, companies) {
         records: companies,
         // Always include `config`, even with a cached token: creating a
         // company is slow enough (real DB work, several seconds each) that
-        // a large batch can outlive the token's TTL, and the route needs
-        // `config` to mint a fresh one mid-batch rather than aborting.
+        // the sequential fallback can outlive the token's TTL, and the route
+        // needs `config` to mint a fresh one mid-batch rather than aborting.
         ...(cached ? { accessToken: cached.accessToken } : {}),
         config
       })
@@ -334,6 +383,56 @@ export async function postCompanies(env, config, companies) {
   } catch (err) {
     return { success: false, error: err.message }
   }
+}
+
+// Calls one of the generic /api/ifs routes for an environment, reusing its
+// cached session token. When IFS rejects that token (expired mid-transfer),
+// retries once with the saved config so the route mints a fresh one.
+async function callIfsRoute(path, env, config, payload) {
+  if (!config?.baseUrl) {
+    return { success: false, error: `No Base URL configured for the ${env} environment.` }
+  }
+  async function attempt(useCache) {
+    const cached = useCache ? getSessionToken(env) : null
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        baseUrl: config.baseUrl,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json().catch(() => ({ success: false, error: `Request failed (${res.status}).` }))
+    return { body, usedCache: Boolean(cached), status: res.status }
+  }
+  try {
+    let { body, usedCache, status } = await attempt(true)
+    if (!body.success && body.tokenInvalid) {
+      clearSessionToken(env)
+      if (usedCache) ({ body, status } = await attempt(false))
+    }
+    if (!body.success) return { ...body, success: false, error: body.error || `Request failed (${status}).` }
+    if (body.token) setSessionToken(env, body.token)
+    return body
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// GETs every record of a registry entity (lib/entityRegistry.js) from the
+// given environment.
+export async function fetchEntityRecords(entityId, env, config) {
+  const body = await callIfsRoute('/api/ifs/entity', env, config, { entity: entityId })
+  return body.success ? { success: true, url: body.url, records: body.records || [] } : body
+}
+
+// POSTs records of a registry entity to the given environment as one $batch
+// (one changeset per record). `results` lines up with `records` by index:
+// { httpStatus, error, errorCode } — httpStatus is null when IFS gave no
+// identifiable answer for that record.
+export async function postEntityBatch(entityId, env, config, records) {
+  return callIfsRoute('/api/ifs/batch', env, config, { entity: entityId, records })
 }
 
 // IFS OData responses carry internal/technical bookkeeping fields alongside
@@ -367,21 +466,6 @@ export function visibleRecordFields(record) {
     .map(([key, value]) => [humanizeFieldName(key), value])
 }
 
-// The exact field set and order the destination expects a SalesPart create
-// payload in — narrower than what SalesPartSet returns (drops read-only/
-// system bookkeeping fields like Company, NoteText, RuleId, Gtin, etc.).
-export const SALES_PART_MIGRATION_FIELDS = [
-  'Contract', 'CatalogNo', 'CatalogDesc', 'PartNo', 'CatalogGroup', 'SalesPriceGroupId',
-  'NoteId', 'SalesUnitMeas', 'ConvFactor', 'DateEntered', 'ListPrice', 'ListPriceInclTax',
-  'RentalListPrice', 'RentalListPriceInclTax', 'PriceConvFactor', 'PriceUnitMeas', 'TaxCode',
-  'CloseTolerance', 'SourcingOption', 'InvertedConvFactor', 'SalesType', 'StatisticalCode',
-  'AcquisitionOrigin', 'AcquisitionReasonId', 'PartDescriptionInUse', 'PartCatalogPartDescription',
-  'InventoryPartDesc', 'Dop', 'UnitMeas', 'CurrencyCode', 'PrimaryCatalog', 'Activeind', 'Taxable',
-  'QuickRegisteredPart', 'UsePriceInclTax', 'ExportToExternalApp', 'CreateSmObjectOption',
-  'CustomerWarranty', 'CatalogTypeDb', 'DocumentText', 'CurrDate', 'Configurable',
-  'CreatePurchasePart', 'ExternalTaxCalcMethod', 'TaxManufEquivalent'
-]
-
 // Narrows full SalesPartSet records down to the migration payload shape.
 export function buildSalesPartMigrationPayload(records) {
   return records.map((record) => {
@@ -392,22 +476,6 @@ export function buildSalesPartMigrationPayload(records) {
     return picked
   })
 }
-
-// The exact field set the destination's PartCatalogSet POST body expects.
-export const PART_CATALOG_MIGRATION_FIELDS = [
-  'AllowAsNotConsumedDb', 'AllowStructChangeDb', 'CatchUnitEnabledDb', 'ComponentLotRule',
-  'ConditionCodeUsage', 'Configurable', 'Description', 'EngSerialTrackingCode', 'KitPart',
-  'KitPartDb', 'LotQuantityRule', 'LotTrackingCode', 'MultilevelTracking', 'PartNo', 'PositionPart',
-  'ReceiptIssueSerialTrackDb', 'SerialRule', 'SerialTrackingCode', 'StdNameId',
-  'StopArrivalIssuedSerialDb', 'StopNewSerialInRmaDb', 'SubLotRule', 'UnitCode', 'InfoText',
-  'PartMainGroup', 'CustWarrantyId', 'SupWarrantyId', 'InputUnitMeasGroupId', 'CatchUnitEnabled',
-  'StopArrivalIssuedSerial', 'WeightNet', 'UomForWeightNet', 'VolumeNet', 'UomForVolumeNet',
-  'FreightFactor', 'AllowAsNotConsumed', 'ReceiptIssueSerialTrack', 'StopNewSerialInRma',
-  'TechnicalDrawingNo', 'ProductTypeClassif', 'CestCode', 'FciCode', 'SerialLifecycleGroupId',
-  'PartCopySourceSite', 'PartCopyGroupId', 'CbsIbsUnitFactor', 'IsUnitFactor', 'LegalReference',
-  'TranslatableInfoText', 'PendingKitAvailReeval', 'InvPartExist', 'PurchPartExist',
-  'SalesPartExist', 'ConfigFamilyId', 'ConfigFamilyIdCheck', 'CopyFamily', 'LuName', 'KeyRef'
-]
 
 // Narrows full PartCatalogSet records down to POST-ready request bodies, one
 // per part.
@@ -466,191 +534,17 @@ export function buildCompanyMigrationPayload(records) {
   })
 }
 
-function mockCustomerRecord(i) {
-  const regions = ['EMEA', 'APAC', 'AMER']
-  return {
-    code: `CUST-${String(1000 + i)}`,
-    name: `Customer ${1000 + i}`,
-    region: regions[i % regions.length]
-  }
-}
-
-function mockCompanyRecord(i) {
-  const countries = ['SE', 'US', 'UK', 'DE']
-  return {
-    code: `COMP-${String(100 + i)}`,
-    name: `Company ${100 + i}`,
-    country: countries[i % countries.length]
-  }
-}
-
-function mockMasterPartRecord(i) {
-  const warehouses = ['SITE-01', 'SITE-02', 'SITE-03']
-  const uoms = ['EA', 'KG', 'BOX', 'LTR']
-  return {
-    sku: `INV-${String(1000 + i)}`,
-    description: `Master Part ${1000 + i}`,
-    warehouse: warehouses[i % warehouses.length],
-    uom: uoms[i % uoms.length]
-  }
-}
-
-function mockSupplierRecord(i) {
-  const categories = ['Raw Materials', 'Packaging', 'Logistics', 'Services']
-  return {
-    code: `SUP-${String(1000 + i)}`,
-    name: `Supplier ${1000 + i}`,
-    category: categories[i % categories.length]
-  }
-}
-
-function mockSiteRecord(i) {
-  const companies = ['COMP-100', 'COMP-101', 'COMP-102']
-  return {
-    code: `SITE-${String(100 + i)}`,
-    name: `Site ${100 + i}`,
-    company: companies[i % companies.length]
-  }
-}
-
-function mockInventoryLocationRecord(i) {
-  const warehouses = ['SITE-01', 'SITE-02', 'SITE-03']
-  const types = ['Bin', 'Rack', 'Zone']
-  return {
-    code: `LOC-${String(1000 + i)}`,
-    description: `Location ${1000 + i}`,
-    warehouse: warehouses[i % warehouses.length],
-    type: types[i % types.length]
-  }
-}
-
-// 'mandatory' entities are foundational (Company/Site must exist before basic
-// data can reference them); 'basic' entities are transferred afterwards.
-export const ENTITY_GROUPS = [
-  { id: 'mandatory', label: 'Transfer Mandatory Data' },
-  { id: 'basic', label: 'Transfer Basic Data' }
-]
-
-export const AVAILABLE_ENTITIES = [
-  {
-    id: 'company',
-    label: 'Company',
-    description: 'Company master records',
-    enabled: true,
-    group: 'mandatory',
-    dependsOn: [],
-    defaultCount: 12,
-    idKey: 'code',
-    rowPrimary: 'name',
-    rowSecondary: ['code', 'country'],
-    generator: mockCompanyRecord
-  },
-  {
-    id: 'site',
-    label: 'Site',
-    description: 'Company site records',
-    enabled: true,
-    group: 'mandatory',
-    dependsOn: ['company'],
-    defaultCount: 8,
-    idKey: 'code',
-    rowPrimary: 'name',
-    rowSecondary: ['code', 'company'],
-    generator: mockSiteRecord
-  },
-  {
-    id: 'customer',
-    label: 'Customer',
-    description: 'Customer master records',
-    enabled: true,
-    group: 'basic',
-    dependsOn: ['company', 'site'],
-    defaultCount: 58,
-    idKey: 'code',
-    rowPrimary: 'name',
-    rowSecondary: ['code', 'region'],
-    subMenu: ['Address', 'Contact', 'Communication Method'],
-    generator: mockCustomerRecord
-  },
-  {
-    id: 'masterPart',
-    label: 'Master Part',
-    description: 'Master part records',
-    enabled: true,
-    group: 'basic',
-    dependsOn: ['company', 'site', 'customer'],
-    defaultCount: 42,
-    idKey: 'sku',
-    rowPrimary: 'description',
-    rowSecondary: ['sku', 'warehouse', 'uom'],
-    generator: mockMasterPartRecord
-  },
-  {
-    id: 'supplier',
-    label: 'Supplier',
-    description: 'Supplier master records',
-    enabled: true,
-    group: 'basic',
-    dependsOn: ['company', 'site'],
-    defaultCount: 27,
-    idKey: 'code',
-    rowPrimary: 'name',
-    rowSecondary: ['code', 'category'],
-    generator: mockSupplierRecord
-  },
-  {
-    id: 'inventoryLocations',
-    label: 'Inventory Locations',
-    description: 'Inventory location records',
-    enabled: true,
-    group: 'basic',
-    dependsOn: ['company', 'site'],
-    defaultCount: 20,
-    idKey: 'code',
-    rowPrimary: 'description',
-    rowSecondary: ['code', 'warehouse', 'type'],
-    generator: mockInventoryLocationRecord
-  }
-]
-
-export function fetchEntitiesData(entityIds) {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const result = {}
-      entityIds.forEach((entityId) => {
-        const entity = AVAILABLE_ENTITIES.find((e) => e.id === entityId)
-        if (!entity) return
-        const records = Array.from({ length: entity.defaultCount }, (_, i) => entity.generator(i))
-        result[entityId] = { records, total: records.length }
-      })
-      resolve(result)
-    }, 900)
-  })
-}
-
-export function runMigration(fromEnv, toEnv, entityBreakdown) {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const totalRecords = entityBreakdown.reduce((sum, e) => sum + e.total, 0)
-      const entry = {
-        id: Date.now(),
-        fromEnv,
-        toEnv,
-        entities: entityBreakdown,
-        totalRecords,
-        completedAt: new Date().toISOString(),
-        status: 'Completed'
-      }
-      const history = getHistory()
-      history.unshift(entry)
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 25)))
-      resolve(entry)
-    }, 1400)
-  })
-}
-
 export function getHistory() {
   if (typeof window === 'undefined') return []
   const raw = localStorage.getItem(HISTORY_KEY)
   return raw ? JSON.parse(raw) : []
+}
+
+// Keeps the last 25 transfers' summaries (not their full transaction logs —
+// those are downloaded as Excel at the end of the run).
+export function saveHistoryEntry(entry) {
+  const history = getHistory()
+  history.unshift(entry)
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 25)))
+  return entry
 }

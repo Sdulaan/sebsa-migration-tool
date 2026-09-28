@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Checkbox from '@mui/material/Checkbox'
 import ArrowBackOutlinedIcon from '@mui/icons-material/ArrowBackOutlined'
@@ -8,18 +8,17 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
 import {
-  SOURCE_ENV,
-  buildSalesPartSetUrl,
-  buildSalesPartMigrationPayload,
-  fetchLiveSalesParts,
+  ENVIRONMENTS,
+  buildLiveDataUrl,
+  fetchLiveData,
   getEnvironmentConfig,
   visibleRecordFields
-} from '../../../../lib/migrationStore'
+} from '../lib/migrationStore'
 
-function SalesPartSetContent() {
+export default function LiveDataView({ dataset }) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const env = searchParams.get('env') || SOURCE_ENV
+  const env = searchParams.get('env') || ENVIRONMENTS[0]
 
   const [loading, setLoading] = useState(true)
   const [result, setResult] = useState(null)
@@ -32,11 +31,11 @@ function SalesPartSetContent() {
     setResult(null)
     const config = getEnvironmentConfig(env)
     try {
-      setDataUrl(buildSalesPartSetUrl(config.baseUrl))
+      setDataUrl(buildLiveDataUrl(config.baseUrl, dataset))
     } catch {
       setDataUrl(null)
     }
-    const fetched = await fetchLiveSalesParts(env, config)
+    const fetched = await fetchLiveData(dataset, env, config)
     setResult(fetched)
     setRecordIndex(0)
     setSelectedIndices(new Set())
@@ -67,12 +66,12 @@ function SalesPartSetContent() {
 
   function handleMigrateData() {
     const selected = [...selectedIndices].sort((a, b) => a - b).map((i) => records[i])
-    const payload = buildSalesPartMigrationPayload(selected)
+    const payload = dataset.buildPayload(selected)
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `sales-part-transfer-${env}-${Date.now()}.json`
+    link.download = `${dataset.exportPrefix}-${env}-${Date.now()}.json`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -84,7 +83,7 @@ function SalesPartSetContent() {
       <header>
         <div>
           <span className="eyebrow">LIVE IFS DATA</span>
-          <h1>SalesPartSet</h1>
+          <h1>{dataset.title}</h1>
           <p style={{ wordBreak: 'break-all' }}>
             {dataUrl
               ? `GET ${dataUrl} using the ${env} environment's saved authorization.`
@@ -135,9 +134,9 @@ function SalesPartSetContent() {
               {records.map((record, i) => {
                 const fields = visibleRecordFields(record)
                 // Titles the row by its first non-empty field, not just the
-                // first field — several leading fields on this projection
-                // (e.g. Objgrants) are always null, which otherwise made
-                // every row's title collapse to a generic "Record N".
+                // first field — leading fields on these projections (e.g.
+                // Objgrants) are always null, which otherwise made every
+                // row's title collapse to a generic "Record N".
                 const isEmpty = (v) => v === null || v === undefined || v === ''
                 const titleField = fields.find(([, value]) => !isEmpty(value))
                 const subtitleFields = fields.filter((f) => f !== titleField && !isEmpty(f[1])).slice(0, 2)
@@ -176,7 +175,7 @@ function SalesPartSetContent() {
           </div>
         )}
 
-        {!loading && result?.success && records.length > 0 && (
+        {!loading && result?.success && records.length > 0 && dataset.buildPayload && (
           <div className="actions">
             <button type="button" onClick={handleMigrateData} disabled={selectedIndices.size === 0}>
               <CloudUploadOutlinedIcon fontSize="small" />
@@ -186,13 +185,5 @@ function SalesPartSetContent() {
         )}
       </div>
     </>
-  )
-}
-
-export default function SalesPartSetPage() {
-  return (
-    <Suspense fallback={<p>Loading…</p>}>
-      <SalesPartSetContent />
-    </Suspense>
   )
 }
