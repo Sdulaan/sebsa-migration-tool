@@ -1072,6 +1072,15 @@ export default function NewMigrationPage() {
               <CloudDownloadOutlinedIcon fontSize="small" />
               Get live data (CompanySet)
             </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => router.push(`/new-migration/company-site-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (CompanySiteSet)
+            </button>
             <button onClick={() => setStep(1)} disabled={!canProceedConfig}>
               Next
             </button>
