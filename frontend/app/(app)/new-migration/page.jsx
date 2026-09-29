@@ -108,6 +108,11 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
   const [liveSubTabs, setLiveSubTabs] = useState(null)
   const [liveLoading, setLiveLoading] = useState(false)
   const [liveError, setLiveError] = useState(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    setSearchQuery('')
+  }, [entity.id])
 
   const isLiveEntity = entity.id === 'company'
   // Company's tab list is fixed to match the real IFS Aurena page (see
@@ -150,6 +155,26 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
     setSelectedSubTabId(subTabId)
   }
 
+  // Filters the middle list by title/key fields, without touching selection
+  // — indices stay the record's real position in `records`, so ticking a
+  // filtered row still selects/transfers the right one. "Select all" still
+  // acts on the full set, not just what's currently filtered into view.
+  const query = searchQuery.trim().toLowerCase()
+  const visibleRecords = query
+    ? records
+        .map((record, index) => ({ record, index }))
+        .filter(({ record }) => {
+          const haystack = [
+            recordTitle(entity, record),
+            ...entity.keyFields.map((key) => record[key])
+          ]
+            .filter((v) => v !== null && v !== undefined)
+            .join(' ')
+            .toLowerCase()
+          return haystack.includes(query)
+        })
+    : records.map((record, index) => ({ record, index }))
+
   // Ticking a checkbox selects the detail view without expanding the row.
   // The record button remains the explicit accordion toggle.
   function handleCheckboxChange(index) {
@@ -170,13 +195,26 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
       {/* Column 2 — record accordion */}
       <div className="erp-records">
         <div className="erp-records-head">
-          <span className="erp-records-title">{entity.label} Records</span>
+          <input
+            type="search"
+            className="erp-records-search"
+            placeholder={`Search ${entity.label.toLowerCase()} records…`}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label={`Search ${entity.label} records`}
+          />
           <button type="button" className="secondary" onClick={onToggleSelectAll}>
             {allSelected ? 'Deselect all' : 'Select all'}
           </button>
         </div>
+        {query && (
+          <p className="field-hint" style={{ margin: '2px 0 8px' }}>
+            {visibleRecords.length} of {records.length} match{visibleRecords.length === 1 ? '' : 'es'}
+          </p>
+        )}
         <div className="erp-records-scroll">
-          {records.map((record, index) => {
+          {visibleRecords.length === 0 && query && <p className="field-hint">No records match “{searchQuery}”.</p>}
+          {visibleRecords.map(({ record, index }) => {
             const isExpanded = expandedRecordId === index
             const isChecked = selectedIds?.has(index) || false
             return (

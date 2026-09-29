@@ -410,8 +410,10 @@ td{vertical-align:top;padding:12px 10px;border-bottom:1px solid var(--border-sof
 /* Column 2 — record accordion */
 .erp-records{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0}
 .erp-records-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid var(--border-soft)}
-.erp-records-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
-.erp-records-head .secondary{padding:6px 10px;font-size:12px}
+.erp-records-search{flex:1;min-width:0;padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;color:var(--text)}
+.erp-records-search:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.erp-records-search::-webkit-search-cancel-button{cursor:pointer}
+.erp-records-head .secondary{padding:6px 10px;font-size:12px;flex:none}
 .erp-records-scroll{overflow:auto;flex:1;max-height:calc(100vh - 380px)}
 .erp-record{border-bottom:1px solid var(--border-soft)}
 .erp-record-row{display:flex;align-items:center;gap:8px;padding:0 8px 0 12px}
