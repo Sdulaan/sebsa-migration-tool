@@ -44,7 +44,8 @@ const DISPLAY_TABS = [
   { tabId: 'tax_control', tabName: 'Tax Control', sources: [{ leaf: 'tax_control', label: null }] },
   { tabId: 'invoice', tabName: 'Invoice', sources: [
       { leaf: 'invoice', label: 'General' },
-      { leaf: 'default_invoice_type', label: 'Default Invoice Types' }
+      { leaf: 'default_invoice_type', label: 'Default Invoice Types' },
+      { leaf: 'supplier_invoice_workflow', label: 'Supplier Invoice Workflow' }
     ] },
   { tabId: 'payment', tabName: 'Payment', sources: [{ leaf: 'payment', label: 'General' }] },
   { tabId: 'fixed_asset', tabName: 'Fixed Assets', sources: [{ leaf: 'fixed_asset', label: null }] },

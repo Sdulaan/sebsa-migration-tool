@@ -190,35 +190,45 @@ export function buildCreateCompanyBatchUrl(baseUrl) {
 // AddressId, not just the company code) — see COMPANY_SUB_ENTITY_NEEDS_ADDRESS.
 // "employees" is the one exception to the nav-property pattern: CompanyEmpSet
 // is its own top-level entity set, filtered by Company.
+// OData string-literal escaping for a value embedded in a key predicate
+// (Company='X', AddressId='Y') — a company code with a space ("FIN GC 01")
+// or an embedded quote would otherwise break the request. Matches the
+// encodeKey() helper in the tested Postman scripts (see companyMigrationSteps.js).
+function odataKey(value) {
+  return encodeURIComponent(String(value ?? '').replace(/'/g, "''"))
+}
+
 const COMPANY_SUB_ENTITY_PATHS = {
-  address: (company) => `CompanySet(Company='${company}')/CompanyAddresses`,
-  message_setup: (company) => `CompanySet(Company='${company}')/MessageSetups`,
-  accounting_rules: (company) => `CompanySet(Company='${company}')/AccountingRulesBasicDataArray`,
-  currency_rate_type_information: (company) => `CompanySet(Company='${company}')/CurrencyTypeBasicDataArray`,
-  tax_control: (company) => `CompanySet(Company='${company}')/TaxControlBasicDataArray`,
-  invoice: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoArray`,
-  po_matching: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoArray`,
-  document_management: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoArray`,
-  default_invoice_type: (company) => `CompanySet(Company='${company}')/CompanyInvoiceInfoDefInvTypes`,
-  payment: (company) => `CompanySet(Company='${company}')/CompanyPayments`,
-  proposal_parameters: (company) => `CompanySet(Company='${company}')/CompanyPayments`,
-  fixed_asset: (company) => `CompanySet(Company='${company}')/CompanyFixedAssetsArray`,
-  periodic_cost_allocation: (company) => `CompanySet(Company='${company}')/CompanyCostAllocInfoArray`,
-  warehouse_management: (company) => `CompanySet(Company='${company}')/CompanyWarehousingInfoArray`,
-  procument: (company) => `CompanySet(Company='${company}')/CompanyProcurementInfoArray`,
-  sales: (company) => `CompanySet(Company='${company}')/CompanySalesInfoArray`,
-  rental: (company) => `CompanySet(Company='${company}')/CompanyRentalInfoArray`,
-  employees: (company) => `CompanyEmpSet?$filter=Company eq '${company}'`,
+  address: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyAddresses`,
+  message_setup: (company) => `CompanySet(Company='${odataKey(company)}')/MessageSetups`,
+  accounting_rules: (company) => `CompanySet(Company='${odataKey(company)}')/AccountingRulesBasicDataArray`,
+  currency_rate_type_information: (company) => `CompanySet(Company='${odataKey(company)}')/CurrencyTypeBasicDataArray`,
+  tax_control: (company) => `CompanySet(Company='${odataKey(company)}')/TaxControlBasicDataArray`,
+  invoice: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyInvoiceInfoArray`,
+  // What "REST APIs.xlsx" labeled "Document Management" actually posts to
+  // CompanyInvoiceSuppInvWorkflows (Supplier Invoice Workflow) — confirmed
+  // against a real tested request in "Post Bulks.txt". "PO Matching" is
+  // genuinely the same entity as Invoice, so it isn't a separate leaf.
+  supplier_invoice_workflow: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyInvoiceSuppInvWorkflows`,
+  default_invoice_type: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyInvoiceInfoDefInvTypes`,
+  payment: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyPayments`,
+  fixed_asset: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyFixedAssetsArray`,
+  periodic_cost_allocation: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyCostAllocInfoArray`,
+  warehouse_management: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyWarehousingInfoArray`,
+  procument: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyProcurementInfoArray`,
+  sales: (company) => `CompanySet(Company='${odataKey(company)}')/CompanySalesInfoArray`,
+  rental: (company) => `CompanySet(Company='${odataKey(company)}')/CompanyRentalInfoArray`,
+  employees: (company) => `CompanyEmpSet?$filter=Company eq '${odataKey(company)}'`,
   address_types: (company, addressId) =>
-    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/AddressTypes`,
+    `CompanySet(Company='${odataKey(company)}')/CompanyAddresses(Company='${odataKey(company)}',AddressId='${odataKey(addressId)}')/AddressTypes`,
   communication_methods: (company, addressId) =>
-    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/AddressCommunicationMethods`,
+    `CompanySet(Company='${odataKey(company)}')/CompanyAddresses(Company='${odataKey(company)}',AddressId='${odataKey(addressId)}')/AddressCommunicationMethods`,
   tax_information: (company, addressId) =>
-    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/TaxCodes`,
+    `CompanySet(Company='${odataKey(company)}')/CompanyAddresses(Company='${odataKey(company)}',AddressId='${odataKey(addressId)}')/TaxCodes`,
   tax_excempt_information: (company, addressId) =>
-    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/TaxExempArray`,
+    `CompanySet(Company='${odataKey(company)}')/CompanyAddresses(Company='${odataKey(company)}',AddressId='${odataKey(addressId)}')/TaxExempArray`,
   supply_chain_information: (company, addressId) =>
-    `CompanySet(Company='${company}')/CompanyAddresses(Company='${company}',AddressId='${addressId}')/CompanyAddressSupplyChainInfoArray`
+    `CompanySet(Company='${odataKey(company)}')/CompanyAddresses(Company='${odataKey(company)}',AddressId='${odataKey(addressId)}')/CompanyAddressSupplyChainInfoArray`
 }
 
 export const COMPANY_SUB_ENTITY_TAB_IDS = Object.keys(COMPANY_SUB_ENTITY_PATHS)

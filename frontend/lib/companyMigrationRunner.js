@@ -97,11 +97,16 @@ async function runStep(step, ctx) {
     if (body.tokenInvalid?.source) clearSessionToken(SOURCE_ENV)
     if (body.tokenInvalid?.destination) clearSessionToken(DEST_ENV)
     if (!res.ok || !body.success) {
-      return { status: 'FAILED', error: body.error || `Request failed (${res.status}).`, records: [] }
+      const result = { status: 'FAILED', error: body.error || `Request failed (${res.status}).`, records: [] }
+      console.error(`[Company migration] ${step.id} (${ctx.co}) failed at the request level:`, result)
+      return result
     }
+    console.log(`[Company migration] ${step.id} (${ctx.co}):`, body)
     return body
   } catch (err) {
-    return { status: 'FAILED', error: err.message, records: [] }
+    const result = { status: 'FAILED', error: err.message, records: [] }
+    console.error(`[Company migration] ${step.id} (${ctx.co}) threw:`, err)
+    return result
   }
 }
 
