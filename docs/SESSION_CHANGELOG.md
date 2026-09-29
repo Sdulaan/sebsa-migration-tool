@@ -20,6 +20,9 @@ This file tracks every change (integrations, features, fixes, config updates) ma
 
 ## 2026-09-29
 
+- **Config** Merged `origin/dev` into `int-site` again. The only new commit on `dev` was `c9a3d22`, the merge of PR #8 (`int-site` as of `a8344e5`) into `dev`. No code changes came in and there were no conflicts; this only brings the two branches' history back in line. `dev` itself was not changed.
+  - Files: `docs/SESSION_CHANGELOG.md`
+
 - **Refactor** Removed the "Get live data (PartCatalogSet)" test button from the New Transfer Configuration step, now that Master Part's real PartCatalogSet data shows in Review Data. The `/new-migration/part-catalog-set` page and its routes are unchanged and still reachable by URL. The SalesPartSet and CompanySet test buttons remain. Checked with `next build`.
   - Files: `frontend/app/(app)/new-migration/page.jsx`, `docs/SESSION_CHANGELOG.md`
 
