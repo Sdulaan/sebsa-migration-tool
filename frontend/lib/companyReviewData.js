@@ -78,27 +78,37 @@ function allLeaves() {
   return [...new Set(DISPLAY_TABS.flatMap((tab) => tab.sources.map((s) => s.leaf)))]
 }
 
+// True/false values — real JSON booleans, or IFS's "TRUE"/"FALSE" strings —
+// as a boolean; anything else as null.
+function asBoolean(value) {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string' && /^(true|false)$/i.test(value)) return value.toLowerCase() === 'true'
+  return null
+}
+
+// One field of real, read-only data: a read-only toggle for true/false
+// values, plain text for everything else.
+function toField(fieldLabel, value, j) {
+  const bool = asBoolean(value)
+  if (bool !== null) return { id: `${fieldLabel}-${j}`, label: fieldLabel, type: 'toggle', value: bool, readOnly: true }
+  return { id: `${fieldLabel}-${j}`, label: fieldLabel, type: 'text', value: value === null || value === undefined ? '' : String(value) }
+}
+
 // One section per record (a company can have several addresses, for
-// instance); each field rendered as plain text — this is real, read-only
-// data, not the mock's typed select/date/toggle form controls. `label`
-// prefixes the section title when a tab merges more than one leaf endpoint.
-function recordsToSections(records, label, emptyLabel) {
+// instance). `label` prefixes the section title when a tab merges more than
+// one leaf endpoint.
+export function recordsToSections(records, label, emptyLabel) {
   const prefix = label ? `${label} — ` : ''
   if (!records || records.length === 0) {
     return [{ title: `${prefix}${emptyLabel}`, fields: [] }]
   }
   return records.map((record, i) => ({
     title: records.length > 1 ? `${prefix}Record ${i + 1}` : `${prefix}${label ? 'Details' : 'General Information'}`,
-    fields: visibleRecordFields(record).map(([fieldLabel, value], j) => ({
-      id: `${fieldLabel}-${j}`,
-      label: fieldLabel,
-      type: 'text',
-      value: value === null || value === undefined ? '' : String(value)
-    }))
+    fields: visibleRecordFields(record).map(([fieldLabel, value], j) => toField(fieldLabel, value, j))
   }))
 }
 
-function errorSections(label, message) {
+export function errorSections(label, message) {
   const prefix = label ? `${label} — ` : ''
   return [{ title: `${prefix}Could not load`, fields: [{ id: 'error', label: 'Error', type: 'text', value: message }] }]
 }
