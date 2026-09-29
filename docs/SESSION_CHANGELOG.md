@@ -18,6 +18,11 @@ This file tracks every change (integrations, features, fixes, config updates) ma
 
 ---
 
+## 2026-09-29
+
+- **Config** Merged `origin/dev` into `int-site`, bringing in 20 commits: the CompanySet batch migration, Person Group page, settings page, LiveDataView, entity tabs config and UI improvements. The one conflict was in `frontend/app/(app)/new-migration/page.jsx`, where both branches added a "Get live data" button in the same place. Resolved by keeping both: CompanySet (from dev), then CompanySiteSet (from int-site). `migrationStore.js` and `globals.css` merged automatically, and I checked them for duplicate exports and duplicate `.site-*` / `.mig-*` / `.company-*` selectors (none). Checked with `next build` and by re-running the site-only migration against mocks on the merged code. `dev` itself was not changed.
+  - Files: `frontend/app/(app)/new-migration/page.jsx`, `docs/SESSION_CHANGELOG.md`
+
 ## 2026-09-28
 
 - **Feature** The site migration dialog now asks what to run: **Create site only** (step 1, `POST CompanySiteSet` through the Destination's `CompanySiteHandling.svc/$batch`), selected by default, or **All 14 steps**. The user wants to try site creation on dev1 first. `runSiteMigration` takes an optional `stepIds`; steps outside it are never called and show as "Not in this run". Checked with `next build` and by running the real client runner for two sites in site-only mode against mocks: IFS received exactly one Source GET and one Destination `$batch` POST per site, in order.

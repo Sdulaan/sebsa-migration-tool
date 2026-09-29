@@ -2,7 +2,7 @@ import './globals.css'
 import ThemeRegistry from '../components/ThemeRegistry'
 
 export const metadata = {
-  title: 'SEBSA | IFS Data Migration',
+  title: 'SEBSA | IFS Data Transfer',
   icons: { icon: '/sebsa-logo.png' }
 }
 
