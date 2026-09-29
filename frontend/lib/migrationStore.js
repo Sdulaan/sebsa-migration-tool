@@ -135,6 +135,19 @@ export function buildPartCatalogSetUrl(baseUrl) {
   return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/PartHandling.svc/PartCatalogSet`
 }
 
+// CompanySiteHandling projection's CompanySiteSet — see fetchLiveCompanySites.
+export function buildCompanySiteSetUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/CompanySiteHandling.svc/CompanySiteSet`
+}
+
+// CompanySiteHandling's OData $batch endpoint — the site migration
+// (/api/ifs/site-migration) writes every step through this.
+export function buildCompanySiteHandlingBatchUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/CompanySiteHandling.svc/$batch`
+}
+
 // The same projection's OData $batch endpoint — parts are created through
 // this, many per request, see postPartCatalogParts.
 export function buildPartHandlingBatchUrl(baseUrl) {
@@ -200,6 +213,66 @@ export async function fetchLivePartCatalog(env, config) {
     if (body.token) setSessionToken(env, body.token)
     const records = body.response?.value || body.response?.d?.results || (Array.isArray(body.response) ? body.response : [])
     return { success: true, url: body.url, status: body.status, response: body.response, records }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Runs the authenticated GET against CompanySiteSet using the given
+// environment's saved authorization. Same shape as fetchLivePartCatalog.
+export async function fetchLiveCompanySites(env, config) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure source environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/company-site-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).`, response: body.response }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    const records = body.response?.value || body.response?.d?.results || (Array.isArray(body.response) ? body.response : [])
+    return { success: true, url: body.url, status: body.status, response: body.response, records }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Runs every site GET (lib/siteDataSources.js, in order) for one site through
+// /api/ifs/site-data. Returns the ordered sections, each holding its records
+// or its own error.
+export async function fetchSiteData(env, config, contract, company) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure source environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/site-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        contract,
+        company,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (body.tokenInvalid) clearSessionToken(env)
+    if (!res.ok || !body.success) {
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return { success: true, contract: body.contract, sections: body.sections }
   } catch (err) {
     return { success: false, error: err.message }
   }
