@@ -44,7 +44,9 @@ function companyStatus(steps, running) {
 
 function StatusIcon({ status }) {
   if (status === 'RUNNING') return <CircularProgress size={16} />
-  if (status === 'SUCCESS') return <CheckCircleOutlineIcon fontSize="small" className="mig-ok" />
+  // ALREADY_EXISTS reads as a checkmark too — the record is in the
+  // destination either way, which is what this icon communicates.
+  if (status === 'SUCCESS' || status === 'ALREADY_EXISTS') return <CheckCircleOutlineIcon fontSize="small" className="mig-ok" />
   if (status === 'FAILED') return <ErrorOutlineIcon fontSize="small" className="mig-fail" />
   if (status === 'PENDING') return <PanoramaFishEyeIcon fontSize="small" className="mig-muted" />
   return <BlockOutlinedIcon fontSize="small" className="mig-muted" />

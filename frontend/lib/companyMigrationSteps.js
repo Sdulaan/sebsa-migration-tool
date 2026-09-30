@@ -288,10 +288,23 @@ export function getCompanyMigrationStep(id) {
 
 // Picks the step's mapped fields off a Source record, in order. Fields the
 // Source didn't return are left out rather than sent empty.
+// Some fields IFS's GET returns are computed display summaries, not plain
+// input — e.g. "Address" came back as "\r\n - \r\nLK - SRI LANKA" (city/
+// street lines joined with real carriage returns, falling back to just the
+// country when the rest is blank). Echoed straight back on create, IFS's
+// own parser rejects the whole request as "Malformed Request." — not
+// something this app raises, but preventable: strip embedded control
+// characters from every string value before sending, since any free-text
+// field could carry the same kind of GET-only formatting.
+function sanitizeValue(value) {
+  if (typeof value !== 'string') return value
+  return value.replace(/[\r\n\t]+/g, ' ').trim()
+}
+
 export function buildStepPayload(step, record) {
   const payload = {}
   ;(step.fields || []).forEach((field) => {
-    if (record && field in record) payload[field] = record[field]
+    if (record && field in record) payload[field] = sanitizeValue(record[field])
   })
   return payload
 }

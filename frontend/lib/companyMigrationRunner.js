@@ -26,6 +26,7 @@ export const STEP_STATUS_LABELS = {
   PENDING: 'Waiting',
   RUNNING: 'Running…',
   SUCCESS: 'Done',
+  ALREADY_EXISTS: 'Already exists',
   NOTHING: 'Nothing to migrate',
   FAILED: 'Failed',
   SKIPPED: 'Skipped',
