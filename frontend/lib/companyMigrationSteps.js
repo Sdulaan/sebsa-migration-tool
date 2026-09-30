@@ -164,6 +164,21 @@ export const COMPANY_MIGRATION_STEPS = [
     fields: TAB_FIELDS.tax_control
   },
   {
+    // Which users have finance access to this company — a prerequisite for
+    // the Site migration's own "Users"/"Users Per Site" steps, which assume
+    // the user is already known to the company. Lives on its own projection,
+    // not CompanyHandling.svc — see `projection` below and
+    // app/api/ifs/company-migration/route.js, which reads it per step.
+    id: 'usersPerCompany',
+    label: 'Users Per Company',
+    method: 'POST',
+    unverified: true,
+    projection: 'UsersPerCompanyHandling.svc',
+    read: (ctx) => `CompanyFinanceSet(Company='${odataKey(ctx.co)}')/UserFinanceArray`,
+    write: (ctx) => `CompanyFinanceSet(Company='${odataKey(ctx.co)}')/UserFinanceArray`,
+    fields: ['Company', 'Userid']
+  },
+  {
     id: 'invoice',
     label: 'Invoice',
     method: 'POST',

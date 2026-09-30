@@ -23,9 +23,11 @@ function recordLabel(record) {
   return field ? `${field} ${record[field]}` : 'Record'
 }
 
-function projectionUrl(baseUrl, path) {
+// Most steps live on CompanyHandling.svc; a step can override this (e.g.
+// Users Per Company lives on UsersPerCompanyHandling.svc instead).
+function projectionUrl(baseUrl, projection, path) {
   if (!baseUrl) throw new Error('Base URL is required.')
-  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/${COMPANY_PROJECTION}/${path}`
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/${projection}/${path}`
 }
 
 async function readEtag(url, accessToken) {
@@ -57,16 +59,17 @@ export async function POST(request) {
     return Response.json({ success: true, status: 'NOTHING', message: 'This company has no address to scope this step to.', records: [] })
   }
   const ctx = { co, addr }
+  const projection = step.projection || COMPANY_PROJECTION
 
   let readUrl
   let batchUrl
   try {
-    readUrl = projectionUrl(body?.source?.baseUrl, step.read(ctx))
+    readUrl = projectionUrl(body?.source?.baseUrl, projection, step.read(ctx))
   } catch {
     return Response.json({ success: false, error: 'Missing Source Base URL — configure it in "Configure source environment".' }, { status: 400 })
   }
   try {
-    batchUrl = projectionUrl(body?.destination?.baseUrl, '$batch')
+    batchUrl = projectionUrl(body?.destination?.baseUrl, projection, '$batch')
   } catch {
     return Response.json({ success: false, error: 'Missing Destination Base URL — configure it in "Configure destination environment".' }, { status: 400 })
   }
@@ -111,7 +114,7 @@ export async function POST(request) {
     } else if (step.method === 'PATCH') {
       let tag
       try {
-        tag = await readEtag(projectionUrl(body.destination.baseUrl, url), dst.accessToken)
+        tag = await readEtag(projectionUrl(body.destination.baseUrl, projection, url), dst.accessToken)
       } catch (err) {
         tag = { error: `Could not reach the Destination: ${err.message}` }
       }
@@ -153,7 +156,7 @@ export async function POST(request) {
     } catch (err) {
       return respond({
         status: 'FAILED',
-        error: `Could not reach ${COMPANY_PROJECTION} $batch: ${err.message}`,
+        error: `Could not reach ${projection} $batch: ${err.message}`,
         sourceCount: read.records.length,
         primaryAddressId,
         records: results
@@ -165,7 +168,7 @@ export async function POST(request) {
       if (batchRes.status === 401) tokenInvalid.destination = true
       return respond({
         status: 'FAILED',
-        error: `${COMPANY_PROJECTION} $batch request failed (${batchRes.status}). ${ifsErrorMessage(batchText)}`.trim(),
+        error: `${projection} $batch request failed (${batchRes.status}). ${ifsErrorMessage(batchText)}`.trim(),
         sourceCount: read.records.length,
         primaryAddressId,
         records: results
