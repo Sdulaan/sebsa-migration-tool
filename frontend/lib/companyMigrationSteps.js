@@ -14,9 +14,6 @@
 //   actually posts to CompanyCostAllocInfoArray (Periodical Cost
 //   Allocation) — both corrected below, from the tested payload's own field
 //   names, not the sheet's label.
-// - "Address Supply Chain Information"'s tested field list (7 fields) is
-//   narrower than entityTabsConfig.json's — narrowed to match what's
-//   actually confirmed working.
 //
 // Steps with no entry in Post Bulks.txt at all (Accounting Rules, Tax
 // Control, Payment, Procurement, Supply Chain — General) are marked
@@ -31,23 +28,19 @@
 // the Destination through CompanyHandling's $batch (see
 // app/api/ifs/company-migration/route.js).
 //
+// Payload: whatever the Source GET actually returned for that record, minus
+// system/read-only bookkeeping fields (see buildStepPayload) — not a
+// curated per-step allow-list. Sending exactly what was fetched, rather
+// than a hand-picked subset, is less likely to silently drop a field IFS
+// actually needs, and matches how the generic entities (Site, Customer, ...)
+// already build their payload in entityRegistry.js's buildEntityPayload.
+//
 // `needsAddress`: scoped to one address (an AddressId), not just the company
 // code. Only the company's first address is migrated for now (matches the
 // same limitation in Review Data) — a company with several addresses only
 // gets these steps for its first one.
 
-import entityTabsConfig from './entityTabsConfig.json'
-
 export const COMPANY_PROJECTION = 'CompanyHandling.svc'
-
-// "*Exist" flags are IFS-computed read-only booleans (same rule already
-// applied to PART_CATALOG_MIGRATION_FIELDS — see docs/IFS_API_INTEGRATION.md
-// Gotchas) — never safe to POST/PATCH, so they're dropped from every tab's
-// field list here, not just the one the sheet happened to show one in.
-const EXCLUDED_FIELD_PATTERN = /Exist$/i
-const TAB_FIELDS = Object.fromEntries(
-  (entityTabsConfig.company || []).map((t) => [t.tabId, t.fields.filter((f) => !EXCLUDED_FIELD_PATTERN.test(f))])
-)
 
 // OData string-literal escaping for a value embedded in a key predicate
 // (Company='X', AddressId='Y') — a company code with a space ("FIN GC 01")
@@ -67,8 +60,7 @@ export const COMPANY_MIGRATION_STEPS = [
     label: 'Address',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CompanyAddresses`,
-    write: (ctx) => `${company(ctx)}/CompanyAddresses`,
-    fields: TAB_FIELDS.address
+    write: (ctx) => `${company(ctx)}/CompanyAddresses`
   },
   {
     id: 'addressTypes',
@@ -76,8 +68,7 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     needsAddress: true,
     read: (ctx) => `${address(ctx)}/AddressTypes`,
-    write: (ctx) => `${address(ctx)}/AddressTypes`,
-    fields: TAB_FIELDS.address_types
+    write: (ctx) => `${address(ctx)}/AddressTypes`
   },
   {
     id: 'communicationMethods',
@@ -85,8 +76,7 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     needsAddress: true,
     read: (ctx) => `${address(ctx)}/AddressCommunicationMethods`,
-    write: (ctx) => `${address(ctx)}/AddressCommunicationMethods`,
-    fields: TAB_FIELDS.communication_methods
+    write: (ctx) => `${address(ctx)}/AddressCommunicationMethods`
   },
   {
     id: 'taxInformation',
@@ -94,8 +84,7 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     needsAddress: true,
     read: (ctx) => `${address(ctx)}/TaxCodes`,
-    write: (ctx) => `${address(ctx)}/TaxCodes`,
-    fields: TAB_FIELDS.tax_information
+    write: (ctx) => `${address(ctx)}/TaxCodes`
   },
   {
     id: 'taxExempt',
@@ -103,8 +92,7 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     needsAddress: true,
     read: (ctx) => `${address(ctx)}/TaxExempArray`,
-    write: (ctx) => `${address(ctx)}/TaxExempArray`,
-    fields: TAB_FIELDS.tax_excempt_information
+    write: (ctx) => `${address(ctx)}/TaxExempArray`
   },
   {
     id: 'addressSupplyChain',
@@ -112,20 +100,14 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     needsAddress: true,
     read: (ctx) => `${address(ctx)}/CompanyAddressSupplyChainInfoArray`,
-    write: (ctx) => `${address(ctx)}/CompanyAddressSupplyChainInfoArray`,
-    // Narrowed to Post Bulks.txt's tested set — entityTabsConfig.json's list
-    // included a few fields (CompanyPrefix, SsccCompanyPrefix, ...) that
-    // look like they actually belong to the company-level Supply Chain
-    // Information (CompanySupplyChainInfoArray) instead.
-    fields: ['AddressId', 'Company', 'IntrastatExempt', 'Contact', 'DeliveryTerms', 'ShipViaCode', 'AddressName']
+    write: (ctx) => `${address(ctx)}/CompanyAddressSupplyChainInfoArray`
   },
   {
     id: 'messageSetup',
     label: 'Message Setup',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/MessageSetups`,
-    write: (ctx) => `${company(ctx)}/MessageSetups`,
-    fields: TAB_FIELDS.message_setup
+    write: (ctx) => `${company(ctx)}/MessageSetups`
   },
   {
     id: 'employees',
@@ -134,8 +116,7 @@ export const COMPANY_MIGRATION_STEPS = [
     // CompanyEmpSet is its own top-level entity set, not a nav property off
     // CompanySet — filtered by Company instead.
     read: (ctx) => `CompanyEmpSet?$filter=Company eq '${odataKey(ctx.co)}'`,
-    write: () => 'CompanyEmpSet',
-    fields: TAB_FIELDS.employees
+    write: () => 'CompanyEmpSet'
   },
   {
     id: 'accountingRules',
@@ -143,16 +124,14 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     unverified: true,
     read: (ctx) => `${company(ctx)}/AccountingRulesBasicDataArray`,
-    write: (ctx) => `${company(ctx)}/AccountingRulesBasicDataArray`,
-    fields: TAB_FIELDS.accounting_rules
+    write: (ctx) => `${company(ctx)}/AccountingRulesBasicDataArray`
   },
   {
     id: 'currencyRateType',
     label: 'Currency Rate Type Information',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CurrencyTypeBasicDataArray`,
-    write: (ctx) => `${company(ctx)}/CurrencyTypeBasicDataArray`,
-    fields: TAB_FIELDS.currency_rate_type_information
+    write: (ctx) => `${company(ctx)}/CurrencyTypeBasicDataArray`
   },
   {
     id: 'taxControl',
@@ -160,8 +139,7 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     unverified: true,
     read: (ctx) => `${company(ctx)}/TaxControlBasicDataArray`,
-    write: (ctx) => `${company(ctx)}/TaxControlBasicDataArray`,
-    fields: TAB_FIELDS.tax_control
+    write: (ctx) => `${company(ctx)}/TaxControlBasicDataArray`
   },
   {
     // Which users have finance access to this company — a prerequisite for
@@ -175,24 +153,21 @@ export const COMPANY_MIGRATION_STEPS = [
     unverified: true,
     projection: 'UsersPerCompanyHandling.svc',
     read: (ctx) => `CompanyFinanceSet(Company='${odataKey(ctx.co)}')/UserFinanceArray`,
-    write: (ctx) => `CompanyFinanceSet(Company='${odataKey(ctx.co)}')/UserFinanceArray`,
-    fields: ['Company', 'Userid']
+    write: (ctx) => `CompanyFinanceSet(Company='${odataKey(ctx.co)}')/UserFinanceArray`
   },
   {
     id: 'invoice',
     label: 'Invoice',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CompanyInvoiceInfoArray`,
-    write: (ctx) => `${company(ctx)}/CompanyInvoiceInfoArray`,
-    fields: TAB_FIELDS.invoice
+    write: (ctx) => `${company(ctx)}/CompanyInvoiceInfoArray`
   },
   {
     id: 'defaultInvoiceType',
     label: 'Default Invoice Types',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CompanyInvoiceInfoDefInvTypes`,
-    write: (ctx) => `${company(ctx)}/CompanyInvoiceInfoDefInvTypes`,
-    fields: TAB_FIELDS.default_invoice_type
+    write: (ctx) => `${company(ctx)}/CompanyInvoiceInfoDefInvTypes`
   },
   {
     // The sheet's row labeled "Document Management" actually targets
@@ -203,12 +178,7 @@ export const COMPANY_MIGRATION_STEPS = [
     label: 'Supplier Invoice Workflow',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CompanyInvoiceSuppInvWorkflows`,
-    write: (ctx) => `${company(ctx)}/CompanyInvoiceSuppInvWorkflows`,
-    fields: [
-      'AddEmptyPostingLine', 'AuthAuthentication', 'AuthorizationRouting', 'AuthorizerFromPurch', 'Company',
-      'ConvertTiffToPdf', 'CreateZeroInvPosting', 'ExcludePoPostings', 'ExcludePostingAuth', 'InvChargeAutomation',
-      'RequisitionerAsAck', 'TwoAuthorizers', 'ValidationAtPosting', 'TwoAuthorizersAmount', 'LedgerAssistant'
-    ]
+    write: (ctx) => `${company(ctx)}/CompanyInvoiceSuppInvWorkflows`
   },
   {
     id: 'payment',
@@ -216,24 +186,21 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     unverified: true,
     read: (ctx) => `${company(ctx)}/CompanyPayments`,
-    write: (ctx) => `${company(ctx)}/CompanyPayments`,
-    fields: TAB_FIELDS.payment
+    write: (ctx) => `${company(ctx)}/CompanyPayments`
   },
   {
     id: 'fixedAssets',
     label: 'Fixed Assets',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CompanyFixedAssetsArray`,
-    write: (ctx) => `${company(ctx)}/CompanyFixedAssetsArray`,
-    fields: TAB_FIELDS.fixed_asset
+    write: (ctx) => `${company(ctx)}/CompanyFixedAssetsArray`
   },
   {
     id: 'periodicCostAllocation',
     label: 'Periodical Cost Allocation',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CompanyCostAllocInfoArray`,
-    write: (ctx) => `${company(ctx)}/CompanyCostAllocInfoArray`,
-    fields: TAB_FIELDS.periodic_cost_allocation
+    write: (ctx) => `${company(ctx)}/CompanyCostAllocInfoArray`
   },
   {
     // The company-level "General" sub-tab of Supply Chain Information
@@ -244,16 +211,14 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     unverified: true,
     read: (ctx) => `${company(ctx)}/CompanySupplyChainInfoArray`,
-    write: (ctx) => `${company(ctx)}/CompanySupplyChainInfoArray`,
-    fields: ['SsccCompanyPrefix', 'UseAccountingYear']
+    write: (ctx) => `${company(ctx)}/CompanySupplyChainInfoArray`
   },
   {
     id: 'warehouseManagement',
     label: 'Supply Chain Information — Warehouse Management',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CompanyWarehousingInfoArray`,
-    write: (ctx) => `${company(ctx)}/CompanyWarehousingInfoArray`,
-    fields: TAB_FIELDS.warehouse_management
+    write: (ctx) => `${company(ctx)}/CompanyWarehousingInfoArray`
   },
   {
     id: 'procurement',
@@ -261,24 +226,21 @@ export const COMPANY_MIGRATION_STEPS = [
     method: 'POST',
     unverified: true,
     read: (ctx) => `${company(ctx)}/CompanyProcurementInfoArray`,
-    write: (ctx) => `${company(ctx)}/CompanyProcurementInfoArray`,
-    fields: TAB_FIELDS.procument
+    write: (ctx) => `${company(ctx)}/CompanyProcurementInfoArray`
   },
   {
     id: 'sales',
     label: 'Supply Chain Information — Sales',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CompanySalesInfoArray`,
-    write: (ctx) => `${company(ctx)}/CompanySalesInfoArray`,
-    fields: TAB_FIELDS.sales
+    write: (ctx) => `${company(ctx)}/CompanySalesInfoArray`
   },
   {
     id: 'rental',
     label: 'Supply Chain Information — Rental',
     method: 'POST',
     read: (ctx) => `${company(ctx)}/CompanyRentalInfoArray`,
-    write: (ctx) => `${company(ctx)}/CompanyRentalInfoArray`,
-    fields: TAB_FIELDS.rental
+    write: (ctx) => `${company(ctx)}/CompanyRentalInfoArray`
   }
 ]
 
@@ -286,25 +248,41 @@ export function getCompanyMigrationStep(id) {
   return COMPANY_MIGRATION_STEPS.find((s) => s.id === id)
 }
 
-// Picks the step's mapped fields off a Source record, in order. Fields the
-// Source didn't return are left out rather than sent empty.
+// Fields IFS returns on every row that must never go back in a create body —
+// same list entityRegistry.js's buildEntityPayload uses for every other
+// entity, so Company's sub-entities follow the same convention.
+const SYSTEM_FIELD_NAMES = new Set([
+  'objid', 'objversion', 'objgrants', 'objstate', 'objevents', 'objkey', 'luname', 'keyref', 'rowversion', 'stateindicator'
+])
+// IFS-computed read-only booleans reporting whether a related record set
+// exists (e.g. "DetailAddressExist") — never a real input field.
+const EXCLUDED_FIELD_PATTERN = /Exist$/i
+
 // Some fields IFS's GET returns are computed display summaries, not plain
-// input — e.g. "Address" came back as "\r\n - \r\nLK - SRI LANKA" (city/
-// street lines joined with real carriage returns, falling back to just the
-// country when the rest is blank). Echoed straight back on create, IFS's
-// own parser rejects the whole request as "Malformed Request." — not
-// something this app raises, but preventable: strip embedded control
-// characters from every string value before sending, since any free-text
-// field could carry the same kind of GET-only formatting.
+// input — e.g. Address's own "Address" field came back as
+// "\r\n - \r\nLK - SRI LANKA" (city/street lines joined with real carriage
+// returns, falling back to just the country when the rest is blank). Echoed
+// straight back on create, IFS's own parser rejects the whole request as
+// "Malformed Request." — not something this app raises, but preventable:
+// strip embedded control characters from every string value before
+// sending, since any free-text field could carry the same kind of
+// GET-only formatting.
 function sanitizeValue(value) {
   if (typeof value !== 'string') return value
   return value.replace(/[\r\n\t]+/g, ' ').trim()
 }
 
+// Sends whatever the Source record actually has, minus system/bookkeeping
+// fields and OData annotations (@odata.etag, ...) — not a curated per-step
+// allow-list. See the module comment above for why.
 export function buildStepPayload(step, record) {
+  if (!record) return {}
   const payload = {}
-  ;(step.fields || []).forEach((field) => {
-    if (record && field in record) payload[field] = sanitizeValue(record[field])
+  Object.entries(record).forEach(([key, value]) => {
+    if (key.startsWith('@')) return
+    if (SYSTEM_FIELD_NAMES.has(key.toLowerCase())) return
+    if (EXCLUDED_FIELD_PATTERN.test(key)) return
+    payload[key] = sanitizeValue(value)
   })
   return payload
 }

@@ -24,19 +24,11 @@ import {
   isParentSatisfied,
   isAlreadyExistsError
 } from './transactionLog'
-import { postEntityBatch, postCompanyHeaderBatch } from './migrationStore'
-
-// Company has a real, confirmed-working create flow (CreateNewCompany, header
-// fields only — see postCompanyHeaderBatch and its own duplicate check) that
-// is nothing like the generic "$batch POST to the entity set" every other
-// registry entity uses. Its sub-entities (Address, Tax Control, ...), shown
-// in Review Data, aren't sent anywhere yet.
-const CUSTOM_POSTERS = {
-  company: postCompanyHeaderBatch
-}
+import { postEntityBatch } from './migrationStore'
+import { runOneCompanyMigration } from './companyMigrationRunner'
 
 function posterFor(entity) {
-  return CUSTOM_POSTERS[entity.id] || ((env, config, records) => postEntityBatch(entity.id, env, config, records))
+  return (env, config, records) => postEntityBatch(entity.id, env, config, records)
 }
 
 export const DEFAULT_CHUNK_SIZE = 50
@@ -104,6 +96,31 @@ export async function runTransfer({
 
     let sent = 0
     onProgress({ entityId: entity.id, sent, toSend: toSend.length })
+
+    // Company has a real, confirmed-working create flow (CreateNewCompany
+    // for the header, then 22 sub-entity steps — Address, Tax Control,
+    // Invoice, ...) that looks nothing like the generic "$batch POST to the
+    // entity set" every other registry entity uses, and produces many log
+    // entries (one per step, not one per company). Runs one company fully
+    // before starting the next, same as the standalone CompanySet page's
+    // migration dialog — reuses that exact runner so both paths behave
+    // identically. Company has no `references`, so `blocked` above is moot.
+    if (entity.id === 'company') {
+      for (const { key, payload, order } of toSend) {
+        if (shouldCancel()) {
+          addLogEntry(log, { entity, key, status: TX_STATUS.SKIPPED, skippedBecause: 'Transfer cancelled', payload, order })
+          continue
+        }
+        await runOneCompanyMigration({
+          company: { co: key, record: payload },
+          log,
+          stepIds: null // every sub-entity step, not just the header
+        })
+        sent += 1
+        onProgress({ entityId: entity.id, sent, toSend: toSend.length })
+      }
+      continue
+    }
 
     for (let start = 0; start < toSend.length; start += chunkSize) {
       const chunk = toSend.slice(start, start + chunkSize)

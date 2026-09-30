@@ -38,6 +38,7 @@ import {
 import { AVAILABLE_ENTITIES, orderEntitiesForTransfer, recordKey } from '../../../lib/entityRegistry'
 import { reviewSubTabList, buildReviewSubTabs } from '../../../lib/reviewDetailMock'
 import { fetchCompanyReviewSubTabs, COMPANY_REVIEW_TABS } from '../../../lib/companyReviewData'
+import { COMPANY_MIGRATION_LOG_ENTITIES } from '../../../lib/companyMigrationRunner'
 import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../lib/transactionLog'
 import { runTransfer } from '../../../lib/transferRunner'
 import { downloadTransactionLog } from '../../../lib/transactionLogExcel'
@@ -539,12 +540,19 @@ export default function NewMigrationPage() {
       recordsByEntity[id] = [...(selectedRecordIds[id] || [])].sort((a, b) => a - b).map((index) => records[index])
     })
     const entities = orderEntitiesForTransfer(selectedEntities).filter((e) => recordsByEntity[e.id]?.length > 0)
+    // Company logs under its header + 22 sub-entity steps (see
+    // transferRunner.js), not under a single "Company" entry — swap it out
+    // of the log's entity list for those, so the Excel export gets one
+    // sheet per step instead of one empty "Company" sheet.
+    const logEntities = entities.some((e) => e.id === 'company')
+      ? [...entities.filter((e) => e.id !== 'company'), ...COMPANY_MIGRATION_LOG_ENTITIES]
+      : entities
     const log = createTransactionLog({
       fromEnv,
       toEnv,
       sourceBaseUrl: sourceConfig.baseUrl,
       destBaseUrl: destConfig.baseUrl,
-      entities
+      entities: logEntities
     })
 
     cancelRequested.current = false
