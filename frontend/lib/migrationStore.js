@@ -22,17 +22,26 @@ export const ENVIRONMENTS = [SOURCE_ENV, DEST_ENV]
 // "authorization path") before any GET call against a projection can succeed.
 export const GRANT_TYPES = [
   { value: 'client_credentials', label: 'Client Credentials (service-to-service)' },
-  { value: 'password', label: 'Password (resource owner)' }
+  { value: 'password', label: 'Password (resource owner)' },
+  { value: 'authorization_code', label: 'Browser sign-in (IFS Cloud login page)' }
 ]
 
-// The IFS Cloud Keycloak realm is the tenant's Namespace system parameter,
-// which can't be derived from the host — so the suggested path leaves a
+// The IFS Cloud Keycloak realm is the tenant's Namespace system parameter.
+// On IFS-hosted tenants (*.ifs.cloud) it's the first host label without its
+// hyphens — pgex9oj-dev1.build.ifs.cloud → realm pgex9ojdev1, confirmed on
+// dev1 and dev2 — so it's filled in. Anywhere else the suggested path keeps a
 // {YourNamespace} placeholder for the user to replace by hand.
+export function suggestNamespace(hostname) {
+  if (!/\.ifs\.cloud$/i.test(hostname)) return null
+  const realm = hostname.split('.')[0].replace(/[^a-z0-9]/gi, '').toLowerCase()
+  return realm || null
+}
+
 export function suggestAuthPath(baseUrl) {
   try {
     const { origin, hostname } = new URL(baseUrl.trim())
     if (!hostname.includes('.')) return ''
-    return `${origin}/auth/realms/{YourNamespace}/protocol/openid-connect/token`
+    return `${origin}/auth/realms/${suggestNamespace(hostname) || '{YourNamespace}'}/protocol/openid-connect/token`
   } catch {
     return ''
   }
@@ -41,6 +50,12 @@ export function suggestAuthPath(baseUrl) {
 export const DEFAULT_ENV_CONFIG = {
   baseUrl: '',
   authPath: '',
+  // Browser sign-in only: the IFS login page. Empty = derived from authPath.
+  authUrl: '',
+  // Browser sign-in only: the redirect URI (callback URL) IFS returns to after
+  // login. Empty = this app's own callback (automatic); any other address,
+  // e.g. Postman's callback, means copy & paste (see lib/ifsBrowserAuth.js).
+  redirectUri: '',
   grantType: 'client_credentials',
   clientId: '',
   clientSecret: '',
@@ -59,12 +74,20 @@ export function getEnvironmentConfigs() {
 
 export function getEnvironmentConfig(env) {
   const all = getEnvironmentConfigs()
-  return { ...DEFAULT_ENV_CONFIG, ...(all[env] || {}) }
+  const config = { ...DEFAULT_ENV_CONFIG, ...(all[env] || {}) }
+  if (config.grantType === 'authorization_code') {
+    const refreshToken = readRefreshTokens()[env]
+    if (refreshToken) config.refreshToken = refreshToken
+  }
+  return config
 }
 
 export function saveEnvironmentConfig(env, config) {
   const all = getEnvironmentConfigs()
+  // The browser sign-in refresh token lives in sessionStorage only — never
+  // persist it with the rest of the config.
   const next = { ...DEFAULT_ENV_CONFIG, ...(all[env] || {}), ...config }
+  delete next.refreshToken
   all[env] = next
   localStorage.setItem(ENV_CONFIG_KEY, JSON.stringify(all))
   return next
@@ -84,16 +107,45 @@ function writeSessionTokens(all) {
   sessionStorage.setItem(SESSION_TOKEN_KEY, JSON.stringify(all))
 }
 
+// Browser sign-in's refresh token, per environment: sessionStorage only (gone
+// when the tab closes), never written into the saved localStorage config.
+// getEnvironmentConfig() adds it to the config so the API routes can renew an
+// expired access token the same way they re-mint client-credentials ones.
+const REFRESH_TOKEN_KEY = 'sebsa_ifs_refresh_tokens'
+
+function readRefreshTokens() {
+  if (typeof window === 'undefined') return {}
+  const raw = sessionStorage.getItem(REFRESH_TOKEN_KEY)
+  return raw ? JSON.parse(raw) : {}
+}
+
+export function setRefreshToken(env, refreshToken) {
+  if (typeof window === 'undefined') return
+  const all = readRefreshTokens()
+  if (refreshToken) all[env] = refreshToken
+  else delete all[env]
+  sessionStorage.setItem(REFRESH_TOKEN_KEY, JSON.stringify(all))
+}
+
 export function getSessionToken(env) {
   const entry = readSessionTokens()[env]
   if (!entry || Date.now() >= entry.expiresAt) return null
   return entry
 }
 
-export function setSessionToken(env, { accessToken, tokenType, expiresIn }) {
+export function setSessionToken(env, { accessToken, tokenType, expiresIn, user, refreshToken }) {
+  // A browser sign-in renewed by an API route can come back with a new
+  // (rotated) refresh token — keep it, or the next renewal would use a stale one.
+  if (refreshToken) setRefreshToken(env, refreshToken)
   const all = readSessionTokens()
   // 5s safety margin so a call doesn't start with a token that expires mid-flight.
-  all[env] = { accessToken, tokenType: tokenType || 'Bearer', expiresAt: Date.now() + (expiresIn || 3600) * 1000 - 5000 }
+  // `user` (the account the token was issued to) is kept for display only.
+  all[env] = {
+    accessToken,
+    tokenType: tokenType || 'Bearer',
+    expiresAt: Date.now() + (expiresIn || 3600) * 1000 - 5000,
+    ...(user ? { user } : {})
+  }
   writeSessionTokens(all)
   return all[env]
 }

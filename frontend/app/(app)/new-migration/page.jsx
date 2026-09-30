@@ -19,6 +19,7 @@ import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import SellOutlinedIcon from '@mui/icons-material/SellOutlined'
 import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined'
+import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined'
 import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined'
 import ViewSidebarOutlinedIcon from '@mui/icons-material/ViewSidebarOutlined'
 import {
@@ -41,6 +42,16 @@ import { reviewSubTabList, buildReviewSubTabs } from '../../../lib/reviewDetailM
 import { fetchCompanyReviewSubTabs, COMPANY_REVIEW_TABS } from '../../../lib/companyReviewData'
 import { fetchSiteReviewSubTabs, SITE_REVIEW_TABS } from '../../../lib/siteReviewData'
 import { allowListReview } from '../../../lib/partReviewData'
+import {
+  signInWithIfsBrowser,
+  startPastedSignIn,
+  finishPastedSignIn,
+  ifsRedirectUri,
+  ifsAuthorizeUrl,
+  effectiveRedirectUri,
+  isAppRedirectUri,
+  POSTMAN_CALLBACK_URI
+} from '../../../lib/ifsBrowserAuth'
 
 // The part entities' Review Data shows the registry's own POST allow-list, so
 // "Transferred to IFS" is exactly what the Transfer step sends.
@@ -324,8 +335,10 @@ export default function NewMigrationPage() {
   const [envConfigs, setEnvConfigs] = useState({})
   const [modalEnv, setModalEnv] = useState('')
   const [authForm, setAuthForm] = useState(DEFAULT_ENV_CONFIG)
-  const [testStatus, setTestStatus] = useState('idle') // idle | testing | success | error
+  const [testStatus, setTestStatus] = useState('idle') // idle | testing | awaiting-paste | success | error
   const [testMessage, setTestMessage] = useState('')
+  // Browser sign-in via Postman's callback: the address the popup ended on.
+  const [pastedSignInUrl, setPastedSignInUrl] = useState('')
   const [sessionTokenInfo, setSessionTokenInfo] = useState(null)
   const [selectedEntities, setSelectedEntities] = useState([])
   const [loading, setLoading] = useState(false)
@@ -370,6 +383,15 @@ export default function NewMigrationPage() {
   const modalOtherEnv = modalTarget === 'from' ? toEnv : fromEnv
   const modalLabel = envLabel(authForm.baseUrl, modalEnv)
   const modalOtherLabel = modalTarget === 'from' ? 'destination' : 'source'
+  // Browser sign-in's redirect URI, and whether it leaves this app (then the
+  // code has to be copied back by hand).
+  const signInRedirectUri = effectiveRedirectUri(authForm)
+  const pastedRedirect = !isAppRedirectUri(signInRedirectUri)
+  // The login page browser sign-in uses when no Auth URL is entered.
+  let derivedAuthUrl = ''
+  try {
+    derivedAuthUrl = ifsAuthorizeUrl(authForm.authPath, authForm.baseUrl)
+  } catch {}
 
   // Scoped to the current from→to pair: an entity already sitting in a
   // different destination doesn't mean it exists in *this* one.
@@ -422,9 +444,41 @@ export default function NewMigrationPage() {
     setTestMessage('')
   }
 
+  // Browser sign-in opens IFS's login page in a popup, so it must start
+  // straight from the click (signInWithIfsBrowser opens the popup before it
+  // awaits anything).
   async function handleTestConnection() {
+    const browser = authForm.grantType === 'authorization_code'
+    const pasted = browser && pastedRedirect
     setTestStatus('testing')
-    const result = await testEnvironmentConnection(modalEnv, authForm)
+    setPastedSignInUrl('')
+
+    // Postman's callback: open the login page, then wait for the user to paste
+    // the address it ends on (handleFinishPastedSignIn).
+    if (pasted) {
+      const started = await startPastedSignIn(modalEnv, authForm)
+      if (started.success) {
+        setTestStatus('awaiting-paste')
+        setTestMessage('')
+      } else {
+        setTestStatus('error')
+        setTestMessage(started.error)
+      }
+      return
+    }
+
+    const result = browser
+      ? await signInWithIfsBrowser(modalEnv, authForm)
+      : await testEnvironmentConnection(modalEnv, authForm)
+    applySignInResult(result)
+  }
+
+  async function handleFinishPastedSignIn() {
+    setTestStatus('testing')
+    applySignInResult(await finishPastedSignIn(modalEnv, authForm, pastedSignInUrl))
+  }
+
+  function applySignInResult(result) {
     if (result.success) {
       setTestStatus('success')
       setTestMessage(result.tokenPreview)
@@ -994,7 +1048,9 @@ export default function NewMigrationPage() {
                     onChange={(e) => updateAuthField('authPath', e.target.value)}
                   />
                   <small className="field-hint">
-                    {'Filled in from the Base URL — replace {YourNamespace} with your own namespace, which you can find in Solution Manager > Setup > System Parameters > parameter "Namespace".'}
+                    {authForm.authPath?.includes('{YourNamespace}')
+                      ? 'Filled in from the Base URL — replace {YourNamespace} with your own namespace, which you can find in Solution Manager > Setup > System Parameters > parameter "Namespace".'
+                      : 'Filled in from the Base URL (for IFS Cloud hosts the namespace is taken from the host name, e.g. pgex9oj-dev1 → pgex9ojdev1). If sign-in says the realm doesn’t exist, check Solution Manager > Setup > System Parameters > parameter "Namespace".'}
                   </small>
                 </label>
 
@@ -1007,6 +1063,64 @@ export default function NewMigrationPage() {
                   </select>
                 </label>
 
+                {authForm.grantType === 'authorization_code' && (
+                  <label>
+                    Auth URL
+                    <input
+                      type="text"
+                      placeholder={derivedAuthUrl || '{Base URL}/auth/realms/{YourNamespace}/protocol/openid-connect/auth'}
+                      value={authForm.authUrl || ''}
+                      onChange={(e) => updateAuthField('authUrl', e.target.value)}
+                    />
+                    <small className="field-hint">
+                      {derivedAuthUrl
+                        ? `IFS Cloud's login page. Leave empty to use ${derivedAuthUrl} (from the Authorization path).`
+                        : "IFS Cloud's login page — ends in /protocol/openid-connect/auth."}
+                    </small>
+                  </label>
+                )}
+
+                {authForm.grantType === 'authorization_code' && (
+                  <label>
+                    Redirect URI (callback URL)
+                    <input
+                      type="text"
+                      placeholder={ifsRedirectUri()}
+                      value={authForm.redirectUri ?? ''}
+                      onChange={(e) => {
+                        updateAuthField('redirectUri', e.target.value)
+                        updateAuthField('redirectMode', undefined)
+                      }}
+                    />
+                    <span className="env-redirect-presets">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          updateAuthField('redirectUri', '')
+                          updateAuthField('redirectMode', undefined)
+                        }}
+                      >
+                        Use this app&apos;s callback
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          updateAuthField('redirectUri', POSTMAN_CALLBACK_URI)
+                          updateAuthField('redirectMode', undefined)
+                        }}
+                      >
+                        Use Postman&apos;s callback
+                      </button>
+                    </span>
+                    <small className="field-hint">
+                      Must be one of the IAM client&apos;s valid redirect URIs. Empty = this app&apos;s callback, which finishes
+                      sign-in automatically; any other address (e.g. Postman&apos;s) needs the copy &amp; paste step.
+                    </small>
+                  </label>
+                )}
+
                 <div className="env-form-pair">
                   <label>
                     Client ID
@@ -1018,7 +1132,7 @@ export default function NewMigrationPage() {
                     />
                   </label>
                   <label>
-                    Client secret
+                    {authForm.grantType === 'authorization_code' ? 'Client secret (optional)' : 'Client secret'}
                     <input
                       type="password"
                       placeholder="••••••••"
@@ -1027,6 +1141,61 @@ export default function NewMigrationPage() {
                     />
                   </label>
                 </div>
+
+                {authForm.grantType === 'authorization_code' && (
+                  <div className="env-signin-note">
+                    <p>
+                      You&apos;ll sign in on IFS Cloud&apos;s own login page with your IFS account — your username and
+                      password are never entered in this tool. Leave the client secret empty if the IAM client is public
+                      (PKCE only).
+                    </p>
+                    {pastedRedirect ? (
+                      <>
+                        <p>
+                          Redirects to <code>{signInRedirectUri}</code>, which this app can&apos;t read — so after you log in,{' '}
+                          <strong>copy the sign-in window&apos;s full address</strong> and paste it below within about a minute.
+                          {signInRedirectUri === POSTMAN_CALLBACK_URI && (
+                            <> If the browser offers to open the Postman app, choose <strong>Cancel</strong> — the code works only once.</>
+                          )}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p>
+                          The IAM client needs <strong>Standard flow</strong> enabled and this <strong>valid redirect URI</strong>:
+                        </p>
+                        <div className="env-signin-uri">
+                          <code>{ifsRedirectUri()}</code>
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => navigator.clipboard?.writeText(ifsRedirectUri())}
+                            title="Copy redirect URI"
+                          >
+                            <ContentCopyOutlinedIcon fontSize="small" />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {testStatus === 'awaiting-paste' && (
+                  <label>
+                    Address the sign-in window ended on
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder={`${signInRedirectUri}?state=…&code=…`}
+                      value={pastedSignInUrl}
+                      onChange={(e) => setPastedSignInUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && pastedSignInUrl.trim()) handleFinishPastedSignIn()
+                      }}
+                    />
+                    <small className="field-hint">Log in in the window that just opened, then copy its address bar here and click Finish sign-in.</small>
+                  </label>
+                )}
 
                 {authForm.grantType === 'password' && (
                   <div className="env-form-pair">
@@ -1064,16 +1233,27 @@ export default function NewMigrationPage() {
               )}
               {sessionTokenInfo && (
                 <p className="field-hint" style={{ marginTop: 10 }}>
+                  {sessionTokenInfo.user ? `Signed in as ${sessionTokenInfo.user}. ` : ''}
                   Session token cached for {modalEnv} — expires {new Date(sessionTokenInfo.expiresAt).toLocaleTimeString()}.
-                  It will be reused (no re-authorization) until then.
+                  It will be reused (no re-authorization) until then
+                  {authForm.grantType === 'authorization_code' ? ', then renewed automatically while this tab stays open.' : '.'}
                 </p>
               )}
             </DialogContent>
             <DialogActions>
               <button type="button" className="ghost" onClick={() => setEnvModalOpen(false)}>Cancel</button>
               <button type="button" className="secondary" onClick={handleTestConnection} disabled={testStatus === 'testing'}>
-                {testStatus === 'testing' ? 'Authorizing…' : 'Test connection'}
+                {authForm.grantType === 'authorization_code'
+                  ? testStatus === 'testing'
+                    ? 'Waiting for IFS sign-in…'
+                    : testStatus === 'awaiting-paste' ? 'Start sign-in again' : 'Sign in with IFS Cloud'
+                  : testStatus === 'testing' ? 'Authorizing…' : 'Test connection'}
               </button>
+              {testStatus === 'awaiting-paste' && (
+                <button type="button" className="secondary" onClick={handleFinishPastedSignIn} disabled={!pastedSignInUrl.trim()}>
+                  Finish sign-in
+                </button>
+              )}
               <button type="button" onClick={handleSaveEnvConfig}>
                 Save &amp; use environment
               </button>
