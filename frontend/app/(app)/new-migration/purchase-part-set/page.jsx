@@ -15,22 +15,22 @@ import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
 import {
   SOURCE_ENV,
   DEST_ENV,
-  buildSalesPartSetUrl,
-  buildSalesPartHandlingBatchUrl,
-  buildSalesPartMigrationPayload,
-  fetchLiveSalesParts,
-  postSalesParts,
+  buildPurchasePartSetUrl,
+  buildPurchasePartHandlingBatchUrl,
+  buildPurchasePartMigrationPayload,
+  fetchLivePurchaseParts,
+  postPurchaseParts,
   getEnvironmentConfig,
   visibleRecordFields
 } from '../../../../lib/migrationStore'
 
-// Each result carries a "SITE / CATALOG NO" key from the server; locally
-// rejected parts may have a "?" for a missing Contract or CatalogNo.
+// Each result carries a "SITE / PART" key from the server; locally rejected
+// parts may have a "?" for a missing Contract or PartNo.
 function partLabel(result) {
   return String(result.key ?? '').trim() || 'Unknown'
 }
 
-function SalesPartSetContent() {
+function PurchasePartSetContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const env = searchParams.get('env') || SOURCE_ENV
@@ -50,11 +50,11 @@ function SalesPartSetContent() {
     setResult(null)
     const config = getEnvironmentConfig(env)
     try {
-      setDataUrl(buildSalesPartSetUrl(config.baseUrl))
+      setDataUrl(buildPurchasePartSetUrl(config.baseUrl))
     } catch {
       setDataUrl(null)
     }
-    const fetched = await fetchLiveSalesParts(env, config)
+    const fetched = await fetchLivePurchaseParts(env, config)
     setResult(fetched)
     setRecordIndex(0)
     setSelectedIndices(new Set())
@@ -88,15 +88,15 @@ function SalesPartSetContent() {
   // even for one part — that's the input the $batch builder expects.
   function selectedParts() {
     const selected = [...selectedIndices].sort((a, b) => a - b).map((i) => records[i])
-    return buildSalesPartMigrationPayload(selected)
+    return buildPurchasePartMigrationPayload(selected)
   }
 
-  // Transferring creates records in the destination environment, so it's
-  // gated behind a confirmation that names the exact URL being called.
+  // Migrating creates records in the destination environment, so it's gated
+  // behind a confirmation that names the exact URL being called.
   function handlePostClick() {
     setPostResult(null)
     try {
-      setPostUrl(buildSalesPartHandlingBatchUrl(getEnvironmentConfig(DEST_ENV).baseUrl))
+      setPostUrl(buildPurchasePartHandlingBatchUrl(getEnvironmentConfig(DEST_ENV).baseUrl))
       setConfirmOpen(true)
     } catch {
       setPostResult({
@@ -109,8 +109,8 @@ function SalesPartSetContent() {
   async function handleConfirmPost() {
     setConfirmOpen(false)
     setPosting(true)
-    const posted = await postSalesParts(DEST_ENV, getEnvironmentConfig(DEST_ENV), selectedParts())
-    console.log('[SalesPartSet post] Result:', posted)
+    const posted = await postPurchaseParts(DEST_ENV, getEnvironmentConfig(DEST_ENV), selectedParts())
+    console.log('[PurchasePartSet post] Result:', posted)
     setPostResult(posted)
     setPosting(false)
   }
@@ -120,7 +120,7 @@ function SalesPartSetContent() {
       <header>
         <div>
           <span className="eyebrow">LIVE IFS DATA</span>
-          <h1>SalesPartSet</h1>
+          <h1>PurchasePartSet</h1>
           <p style={{ wordBreak: 'break-all' }}>
             {dataUrl
               ? `GET ${dataUrl} using the ${env} environment's saved authorization.`
@@ -146,7 +146,7 @@ function SalesPartSetContent() {
           </button>
         </div>
 
-        {loading && <p>Authorizing and Fetching…</p>}
+        {loading && <p>Authorizing and fetching…</p>}
 
         {!loading && result && !result.success && (
           <div className="auth-banner error">
@@ -171,9 +171,9 @@ function SalesPartSetContent() {
               {records.map((record, i) => {
                 const fields = visibleRecordFields(record)
                 // Titles the row by its first non-empty field, not just the
-                // first field — several leading fields on this projection
-                // (e.g. Objgrants) are always null, which otherwise made
-                // every row's title collapse to a generic "Record N".
+                // first field — leading fields on IFS projections (e.g.
+                // Objgrants) are often always null, which would otherwise
+                // collapse every row's title to a generic "Record N".
                 const isEmpty = (v) => v === null || v === undefined || v === ''
                 const titleField = fields.find(([, value]) => !isEmpty(value))
                 const subtitleFields = fields.filter((f) => f !== titleField && !isEmpty(f[1])).slice(0, 2)
@@ -238,13 +238,13 @@ function SalesPartSetContent() {
             {postResult.successful.map((r, i) => (
               <div key={`ok-${i}`} className="auth-banner success" style={{ marginTop: 8 }}>
                 <CheckCircleOutlineIcon fontSize="small" />
-                <span>{partLabel(r)} — Created ({r.status})</span>
+                <span>{r.key} — Created ({r.status})</span>
               </div>
             ))}
             {postResult.failed.map((r, i) => (
               <div key={`failed-${i}`} className="auth-banner error" style={{ marginTop: 8 }}>
                 <ErrorOutlineIcon fontSize="small" />
-                <span>{partLabel(r)} — {r.error}{r.status ? ` (HTTP ${r.status})` : ''}</span>
+                <span>{partLabel(r)} — {r.error}</span>
               </div>
             ))}
             {postResult.unconfirmed.map((r, i) => (
@@ -261,8 +261,8 @@ function SalesPartSetContent() {
         <DialogTitle>Transfer to destination environment?</DialogTitle>
         <DialogContent>
           <p className="login-sub" style={{ marginTop: -4, wordBreak: 'break-all' }}>
-            This will create {selectedIndices.size} sales part{selectedIndices.size === 1 ? '' : 's'} in the destination
-            environment by sending one $batch request to {postUrl}, with a separate changeset (POST SalesPartSet) per part.
+            This will create {selectedIndices.size} purchase part{selectedIndices.size === 1 ? '' : 's'} in the destination
+            environment by sending one $batch request to {postUrl}, with a separate changeset (POST PurchasePartSet) per part.
           </p>
         </DialogContent>
         <DialogActions>
@@ -274,10 +274,10 @@ function SalesPartSetContent() {
   )
 }
 
-export default function SalesPartSetPage() {
+export default function PurchasePartSetPage() {
   return (
     <Suspense fallback={<p>Loading…</p>}>
-      <SalesPartSetContent />
+      <PurchasePartSetContent />
     </Suspense>
   )
 }
