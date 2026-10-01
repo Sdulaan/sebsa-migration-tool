@@ -590,6 +590,7 @@ export async function postCompanyHeaderBatch(env, config, records) {
     : null
 
   const payloads = buildCompanyMigrationPayload(records)
+  console.log('[Company migration] CreateNewCompany payload (built from the Source record, before the already-exists check):', payloads)
   const results = new Array(records.length).fill(null)
   const toPost = []
   const toPostIndices = []
@@ -741,7 +742,7 @@ export function buildPartCatalogMigrationPayload(records) {
 const COMPANY_CREATION_DEFAULTS = {
   CreateAsTemplateCompany: false,
   CreateAsMasterCompany: false,
-  SourceCompany: '',
+  SourceCompany: null,
   TemplateId: 'STD-PT',
   StartMonth: 1,
   NumberOfYears: 12,
