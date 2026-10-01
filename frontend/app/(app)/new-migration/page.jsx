@@ -18,6 +18,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import SellOutlinedIcon from '@mui/icons-material/SellOutlined'
+import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined'
 import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined'
 import ViewSidebarOutlinedIcon from '@mui/icons-material/ViewSidebarOutlined'
 import {
@@ -39,6 +40,28 @@ import { AVAILABLE_ENTITIES, orderEntitiesForTransfer, recordKey } from '../../.
 import { reviewSubTabList, buildReviewSubTabs } from '../../../lib/reviewDetailMock'
 import { fetchCompanyReviewSubTabs, COMPANY_REVIEW_TABS } from '../../../lib/companyReviewData'
 import { COMPANY_MIGRATION_LOG_ENTITIES } from '../../../lib/companyMigrationRunner'
+import { fetchSiteReviewSubTabs, SITE_REVIEW_TABS } from '../../../lib/siteReviewData'
+import { allowListReview } from '../../../lib/partReviewData'
+
+// The part entities' Review Data shows the registry's own POST allow-list, so
+// "Transferred to IFS" is exactly what the Transfer step sends.
+const partReview = (id) => {
+  const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
+  return allowListReview(entity.fields, entity.fixedValues)
+}
+
+// Entities whose Review Data sub-tabs are real data rather than the
+// reviewDetailMock.js mock: a fixed tab list, and the function that fills it
+// for one record (companyReviewData.js / siteReviewData.js /
+// partReviewData.js).
+const LIVE_REVIEW_ENTITIES = {
+  company: { tabs: COMPANY_REVIEW_TABS, fetchSubTabs: fetchCompanyReviewSubTabs },
+  site: { tabs: SITE_REVIEW_TABS, fetchSubTabs: fetchSiteReviewSubTabs },
+  masterPart: partReview('masterPart'),
+  inventoryPart: partReview('inventoryPart'),
+  purchasePart: partReview('purchasePart'),
+  salesPart: partReview('salesPart')
+}
 import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../lib/transactionLog'
 import { runTransfer } from '../../../lib/transferRunner'
 import { downloadTransactionLog } from '../../../lib/transactionLogExcel'
@@ -52,6 +75,7 @@ const ENTITY_ICONS = {
   customer: PersonOutlineOutlinedIcon,
   masterPart: Inventory2OutlinedIcon,
   inventoryPart: CategoryOutlinedIcon,
+  purchasePart: ShoppingCartOutlinedIcon,
   salesPart: SellOutlinedIcon,
   supplier: LocalShippingOutlinedIcon,
   inventoryLocations: WarehouseOutlinedIcon
@@ -84,9 +108,16 @@ function ReviewFormField({ field }) {
       ) : field.type === 'date' ? (
         <input type="date" defaultValue={field.value} />
       ) : field.type === 'toggle' ? (
-        <label className="erp-toggle">
-          <input type="checkbox" defaultChecked={Boolean(field.value)} />
+        // Live IFS data is read-only: its toggles show the value but can't be flipped.
+        <label className={`erp-toggle ${field.readOnly ? 'read-only' : ''}`}>
+          <input
+            type="checkbox"
+            defaultChecked={Boolean(field.value)}
+            disabled={field.readOnly}
+            aria-label={`${field.label}: ${field.value ? 'Yes' : 'No'}`}
+          />
           <span className="erp-toggle-track"><span className="erp-toggle-thumb" /></span>
+          {field.readOnly && <span className="erp-toggle-text">{field.value ? 'Yes' : 'No'}</span>}
         </label>
       ) : (
         <input type="text" defaultValue={field.value == null ? '' : String(field.value)} />
@@ -103,9 +134,9 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
   const [expandedRecordId, setExpandedRecordId] = useState(null)
   const [selectedRecordId, setSelectedRecordId] = useState(null)
   const [selectedSubTabId, setSelectedSubTabId] = useState(null)
-  // Company only: its sub-tabs are real GET data (see companyReviewData.js),
-  // fetched for the whole record when it's selected — everything else still
-  // uses the instant mock from reviewDetailMock.js.
+  // Company and Site: their sub-tabs are real GET data (see
+  // LIVE_REVIEW_ENTITIES), fetched for the whole record when it's selected —
+  // everything else still uses the instant mock from reviewDetailMock.js.
   const [liveSubTabs, setLiveSubTabs] = useState(null)
   const [liveLoading, setLiveLoading] = useState(false)
   const [liveError, setLiveError] = useState(null)
@@ -115,11 +146,11 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
     setSearchQuery('')
   }, [entity.id])
 
-  const isLiveEntity = entity.id === 'company'
-  // Company's tab list is fixed to match the real IFS Aurena page (see
-  // companyReviewData.js) — not the Excel-generated 24-tab schema
-  // reviewSubTabList() would otherwise show.
-  const subTabList = isLiveEntity ? COMPANY_REVIEW_TABS : reviewSubTabList(entity)
+  const live = LIVE_REVIEW_ENTITIES[entity.id]
+  const isLiveEntity = Boolean(live)
+  // A live entity's tab list is fixed to match the real IFS page — not the
+  // Excel-generated schema reviewSubTabList() would otherwise show.
+  const subTabList = isLiveEntity ? live.tabs : reviewSubTabList(entity)
   const selectedRecord = selectedRecordId != null ? records[selectedRecordId] : null
 
   useEffect(() => {
@@ -131,7 +162,7 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
     let cancelled = false
     setLiveLoading(true)
     setLiveError(null)
-    fetchCompanyReviewSubTabs(selectedRecord).then((result) => {
+    live.fetchSubTabs(selectedRecord).then((result) => {
       if (cancelled) return
       setLiveLoading(false)
       if (result.success) setLiveSubTabs(result.subTabs)
@@ -287,7 +318,12 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
               </div>
             </div>
 
-            {isLiveEntity && liveLoading && <p className="field-hint">Fetching live data from IFS…</p>}
+            {isLiveEntity && liveLoading && (
+              <p className="field-hint">
+                Fetching live data from IFS
+                {entity.id === 'site' ? ` (${SITE_REVIEW_TABS.length - 1} calls, in order)` : ''}…
+              </p>
+            )}
 
             {isLiveEntity && !liveLoading && liveError && (
               <div className="auth-banner error">
@@ -1112,20 +1148,29 @@ export default function NewMigrationPage() {
             <button
               type="button"
               className="secondary"
+              onClick={() => router.push(`/new-migration/inventory-part-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (InventoryPartSet)
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => router.push(`/new-migration/purchase-part-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (PurchasePartSet)
+            </button>
+            <button
+              type="button"
+              className="secondary"
               onClick={() => router.push(`/new-migration/company-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
               disabled={!fromEnv}
             >
               <CloudDownloadOutlinedIcon fontSize="small" />
               Get live data (CompanySet)
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => router.push(`/new-migration/company-site-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
-              disabled={!fromEnv}
-            >
-              <CloudDownloadOutlinedIcon fontSize="small" />
-              Get live data (CompanySiteSet)
             </button>
             <button onClick={() => setStep(1)} disabled={!canProceedConfig}>
               Next

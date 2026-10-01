@@ -1,6 +1,13 @@
-import { SALES_PART_MIGRATION_FIELDS, PART_CATALOG_MIGRATION_FIELDS } from './migrationFields'
+import {
+  SALES_PART_MIGRATION_FIELDS,
+  PART_CATALOG_MIGRATION_FIELDS,
+  INVENTORY_PART_MIGRATION_FIELDS,
+  PURCHASE_PART_MIGRATION_FIELDS,
+  PART_CATALOG_FIXED_VALUES,
+  pickPayloadFields
+} from './migrationFields'
 
-export { SALES_PART_MIGRATION_FIELDS, PART_CATALOG_MIGRATION_FIELDS }
+export { SALES_PART_MIGRATION_FIELDS, PART_CATALOG_MIGRATION_FIELDS, INVENTORY_PART_MIGRATION_FIELDS, PURCHASE_PART_MIGRATION_FIELDS }
 const HISTORY_KEY = 'sebsa_ifs_migration_history'
 const ENV_CONFIG_KEY = 'sebsa_ifs_env_config'
 const SESSION_TOKEN_KEY = 'sebsa_ifs_session_tokens'
@@ -147,6 +154,41 @@ export function buildCompanySiteSetUrl(baseUrl) {
 export function buildCompanySiteHandlingBatchUrl(baseUrl) {
   if (!baseUrl) throw new Error('Base URL is required.')
   return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/CompanySiteHandling.svc/$batch`
+}
+
+// InventoryPartHandling projection's InventoryPartSet — see
+// fetchLiveInventoryParts.
+export function buildInventoryPartSetUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/InventoryPartHandling.svc/InventoryPartSet`
+}
+
+// The same projection's OData $batch endpoint — inventory parts are created
+// through this, many per request, see postInventoryParts.
+export function buildInventoryPartHandlingBatchUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/InventoryPartHandling.svc/$batch`
+}
+
+// SalesPartHandling's OData $batch endpoint — sales parts are created through
+// this, many per request, see postSalesParts.
+export function buildSalesPartHandlingBatchUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/SalesPartHandling.svc/$batch`
+}
+
+// PurchasePartHandling projection's PurchasePartSet — see
+// fetchLivePurchaseParts.
+export function buildPurchasePartSetUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/PurchasePartHandling.svc/PurchasePartSet`
+}
+
+// The same projection's OData $batch endpoint — purchase parts are created
+// through this, many per request, see postPurchaseParts.
+export function buildPurchasePartHandlingBatchUrl(baseUrl) {
+  if (!baseUrl) throw new Error('Base URL is required.')
+  return `${baseUrl.replace(/\/+$/, '')}/main/ifsapplications/projection/v1/PurchasePartHandling.svc/$batch`
 }
 
 // The same projection's OData $batch endpoint — parts are created through
@@ -414,6 +456,181 @@ export async function fetchSiteData(env, config, contract, company) {
     }
     if (body.token) setSessionToken(env, body.token)
     return { success: true, contract: body.contract, sections: body.sections }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Runs the authenticated GET against InventoryPartSet using the given
+// environment's saved authorization. Same shape as fetchLivePartCatalog.
+export async function fetchLiveInventoryParts(env, config) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure source environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/inventory-part-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).`, response: body.response }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    const records = body.response?.value || body.response?.d?.results || (Array.isArray(body.response) ? body.response : [])
+    return { success: true, url: body.url, status: body.status, response: body.response, records }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Creates the given inventory parts through the InventoryPartHandling $batch
+// endpoint, authorized by the given environment (the destination). Same
+// contract as postPartCatalogParts: every part is sorted into successful /
+// failed / unconfirmed.
+export async function postInventoryParts(env, config, parts) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure destination environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/inventory-part-set/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        records: parts,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return {
+      success: true,
+      url: body.url,
+      batchStatus: body.batchStatus,
+      summary: body.summary,
+      successful: body.successful,
+      failed: body.failed,
+      unconfirmed: body.unconfirmed
+    }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Creates the given sales parts through the SalesPartHandling $batch endpoint,
+// authorized by the given environment (the destination). Same contract as
+// postPartCatalogParts: every part is sorted into successful / failed /
+// unconfirmed.
+export async function postSalesParts(env, config, parts) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure destination environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/sales-part-set/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        records: parts,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return {
+      success: true,
+      url: body.url,
+      batchStatus: body.batchStatus,
+      summary: body.summary,
+      successful: body.successful,
+      failed: body.failed,
+      unconfirmed: body.unconfirmed
+    }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Runs the authenticated GET against PurchasePartSet using the given
+// environment's saved authorization. Same shape as fetchLivePartCatalog.
+export async function fetchLivePurchaseParts(env, config) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure source environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/purchase-part-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).`, response: body.response }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    const records = body.response?.value || body.response?.d?.results || (Array.isArray(body.response) ? body.response : [])
+    return { success: true, url: body.url, status: body.status, response: body.response, records }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Creates the given purchase parts through the PurchasePartHandling $batch
+// endpoint, authorized by the given environment (the destination). Same
+// contract as postPartCatalogParts: every part is sorted into successful /
+// failed / unconfirmed.
+export async function postPurchaseParts(env, config, parts) {
+  const cached = env ? getSessionToken(env) : null
+  if (!config?.baseUrl) {
+    return { success: false, error: 'This environment has no Base URL configured — set one in "Configure destination environment".' }
+  }
+  try {
+    const res = await fetch('/api/ifs/purchase-part-set/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: config.baseUrl,
+        records: parts,
+        ...(cached ? { accessToken: cached.accessToken } : { config })
+      })
+    })
+    const body = await res.json()
+    if (!res.ok || !body.success) {
+      if (body.tokenInvalid) clearSessionToken(env)
+      return { success: false, error: body.error || `Request failed (${res.status}).` }
+    }
+    if (body.token) setSessionToken(env, body.token)
+    return {
+      success: true,
+      url: body.url,
+      batchStatus: body.batchStatus,
+      summary: body.summary,
+      successful: body.successful,
+      failed: body.failed,
+      unconfirmed: body.unconfirmed
+    }
   } catch (err) {
     return { success: false, error: err.message }
   }
@@ -723,15 +940,10 @@ export function buildSalesPartMigrationPayload(records) {
 }
 
 // Narrows full PartCatalogSet records down to POST-ready request bodies, one
-// per part.
+// per part, with PART_CATALOG_FIXED_VALUES applied (PositionPart is always
+// "NotAPositionPart").
 export function buildPartCatalogMigrationPayload(records) {
-  return records.map((record) => {
-    const picked = {}
-    PART_CATALOG_MIGRATION_FIELDS.forEach((key) => {
-      if (key in record) picked[key] = record[key]
-    })
-    return picked
-  })
+  return records.map((record) => pickPayloadFields(record, PART_CATALOG_MIGRATION_FIELDS, PART_CATALOG_FIXED_VALUES))
 }
 
 // CreateNewCompany takes wizard fields a plain CompanySet record doesn't
@@ -776,6 +988,30 @@ export function buildCompanyMigrationPayload(records) {
       Country: record.Country ?? '',
       InternalName: name
     }
+  })
+}
+
+// Narrows full InventoryPartSet records down to POST-ready request bodies, one
+// per inventory part.
+export function buildInventoryPartMigrationPayload(records) {
+  return records.map((record) => {
+    const picked = {}
+    INVENTORY_PART_MIGRATION_FIELDS.forEach((key) => {
+      if (key in record) picked[key] = record[key]
+    })
+    return picked
+  })
+}
+
+// Narrows full PurchasePartSet records down to POST-ready request bodies, one
+// per purchase part.
+export function buildPurchasePartMigrationPayload(records) {
+  return records.map((record) => {
+    const picked = {}
+    PURCHASE_PART_MIGRATION_FIELDS.forEach((key) => {
+      if (key in record) picked[key] = record[key]
+    })
+    return picked
   })
 }
 

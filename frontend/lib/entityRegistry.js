@@ -19,11 +19,20 @@
 //               the transfer order (referenced entities are added automatically)
 //   fields      optional POST allow-list (and order); without one, the
 //               source record is sent minus OData/system bookkeeping fields
+//   fixedValues optional { field: value } always sent in place of the
+//               source record's value (only with `fields`)
 //   verified    what has been confirmed against a real tenant: 'post' | 'get' | null.
 //               Unverified entries use the standard IFS Cloud projection
 //               names — check them against your tenant's API Explorer.
 
-import { SALES_PART_MIGRATION_FIELDS, PART_CATALOG_MIGRATION_FIELDS } from './migrationFields'
+import {
+  SALES_PART_MIGRATION_FIELDS,
+  PART_CATALOG_MIGRATION_FIELDS,
+  INVENTORY_PART_MIGRATION_FIELDS,
+  PURCHASE_PART_MIGRATION_FIELDS,
+  PART_CATALOG_FIXED_VALUES,
+  pickPayloadFields
+} from './migrationFields'
 
 export const ENTITY_GROUPS = [
   { id: 'mandatory', label: 'Transfer Mandatory Data' },
@@ -93,6 +102,7 @@ const DEFINITIONS = [
     references: [],
     dependsOn: ['company', 'site'],
     fields: PART_CATALOG_MIGRATION_FIELDS,
+    fixedValues: PART_CATALOG_FIXED_VALUES,
     verified: 'post'
   },
   {
@@ -109,6 +119,24 @@ const DEFINITIONS = [
       { entity: 'masterPart', fields: { PartNo: 'PartNo' } }
     ],
     dependsOn: ['company', 'site', 'masterPart'],
+    fields: INVENTORY_PART_MIGRATION_FIELDS,
+    verified: null
+  },
+  {
+    id: 'purchasePart',
+    label: 'Purchase Part',
+    description: 'Purchase part records per site',
+    group: 'basic',
+    projection: 'PurchasePartHandling.svc',
+    entitySet: 'PurchasePartSet',
+    keyFields: ['Contract', 'PartNo'],
+    titleField: 'Description',
+    references: [
+      { entity: 'site', fields: { Contract: 'Contract' } },
+      { entity: 'masterPart', fields: { PartNo: 'PartNo' } }
+    ],
+    dependsOn: ['company', 'site', 'masterPart'],
+    fields: PURCHASE_PART_MIGRATION_FIELDS,
     verified: null
   },
   {
@@ -161,6 +189,7 @@ const DEFINITIONS = [
 export const AVAILABLE_ENTITIES = DEFINITIONS.map((entity) => ({
   enabled: true,
   fields: null,
+  fixedValues: null,
   subMenu: null,
   ...entity,
   dependsOn: [...new Set([...entity.dependsOn, ...entity.references.map((r) => r.entity)])]
@@ -223,13 +252,7 @@ const SYSTEM_FIELD_NAMES = new Set([
 ])
 
 export function buildEntityPayload(entity, record) {
-  if (entity.fields) {
-    const picked = {}
-    entity.fields.forEach((key) => {
-      if (key in record) picked[key] = record[key]
-    })
-    return picked
-  }
+  if (entity.fields) return pickPayloadFields(record, entity.fields, entity.fixedValues)
   return Object.fromEntries(
     Object.entries(record).filter(([key]) => !key.startsWith('@') && !SYSTEM_FIELD_NAMES.has(key.toLowerCase()))
   )
