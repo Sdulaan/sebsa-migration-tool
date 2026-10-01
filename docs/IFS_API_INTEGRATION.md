@@ -489,6 +489,10 @@ Every entity is one entry. **To add an entity to the transfer, add an entry here
 
 ### How a transfer runs (`frontend/lib/transferRunner.js`)
 
+Supplier uses `SupplierInfoGeneralSet` for its header GET and create. After a header is created (or already exists), the runner reads its child navigation collections from Source and creates them in Destination in parent order: addresses, address types, communication methods, contacts, delivery tax information and tax codes, purchase and outbound address information, message setup, invoice, payment and payment methods, and purchase. These use the paths and payload fields in `frontend/lib/supplierApi.js`, based on the supplied SupplierHandling examples. Child creates use the same 50-record `$batch` chunks and per-record result handling as other entities. URL routing keys are sent separately from the allow-listed JSON body. A failed source GET is recorded in the transaction log; a child whose parent create fails is skipped.
+
+The supplied source API examples confirm the 14 GET collection paths and their response fields. Each create body picks only fields listed for that stage's POST request; source-only metadata and extra fields are omitted. The supplier API route applies the same field list before constructing a batch. Parent identifiers are kept separately for nested URL routing, so they are not added to a POST body when absent from the source record. Source GET errors, invalid child ownership, and individual IFS failures are recorded in the transaction log. Live source and destination permissions still need verification in the configured tenants.
+
 1. The selected entities are ordered parents-first (`orderEntitiesForTransfer`).
 2. Each record of an entity is checked before anything is sent:
    - **A key field is blank** → `Failed` ("Missing key field(s)").

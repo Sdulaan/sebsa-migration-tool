@@ -21,7 +21,10 @@ export async function resolveAccessToken(body, fallbackOrigin) {
 export function ifsErrorMessage(text) {
   try {
     const parsed = JSON.parse(text)
-    return parsed?.error?.message || parsed?.message || ''
+    const error = parsed?.error || parsed
+    const message = (value) => typeof value === 'string' ? value : typeof value?.value === 'string' ? value.value : ''
+    const details = Array.isArray(error?.details) ? error.details.map((detail) => message(detail?.message)).filter(Boolean) : []
+    return details.join('; ') || message(error?.message) || ''
   } catch {
     return ''
   }

@@ -23,7 +23,7 @@ export function buildODataBatch(entitySet, records, validate = validateObject) {
 
   records.forEach((record, index) => {
     const id = index + 1
-    const problem = validateObject(record) || validate(record)
+    const problem = validateObject(record) || validate(record, index)
     if (problem) {
       skipped.push({ index, error: problem, record })
       return
@@ -39,7 +39,7 @@ export function buildODataBatch(entitySet, records, validate = validateObject) {
       'Content-Transfer-Encoding: binary',
       `Content-ID: ${id}`,
       '',
-      `POST ${entitySet} HTTP/1.1`,
+      `POST ${typeof entitySet === 'function' ? entitySet(record, index) : entitySet} HTTP/1.1`,
       'Content-Type: application/json',
       'Accept: application/json',
       '',
@@ -84,9 +84,18 @@ export function parseODataBatchResponse(text, contentType) {
     let error = null
     let errorCode = null
     if (status >= 300) {
-      // Pull the IFS error message out of the JSON error body.
-      error = readJsonString(part, 'message') || statusMatch[0].trim()
-      errorCode = readJsonString(part, 'code')
+      // IFS may put the useful explanation in error.details rather than
+      // error.message. Keep the status line when the body cannot be parsed.
+      const httpPart = part.slice(statusMatch.index)
+      const separator = /\r?\n\r?\n/.exec(httpPart)
+      const rawBody = separator ? httpPart.slice(separator.index + separator[0].length).split(/\r?\n--[A-Za-z0-9_.-]+/)[0].trim() : ''
+      let parsed = null
+      try { parsed = JSON.parse(rawBody) } catch {}
+      const apiError = parsed?.error || parsed
+      const message = (value) => typeof value === 'string' ? value : typeof value?.value === 'string' ? value.value : null
+      const details = Array.isArray(apiError?.details) ? apiError.details.map((item) => message(item?.message)).filter(Boolean) : []
+      error = details.join('; ') || message(apiError?.message) || readJsonString(part, 'message') || statusMatch[0].trim()
+      errorCode = apiError?.code || readJsonString(part, 'code')
     }
     results[idMatch[1]] = { status, error, errorCode }
   })

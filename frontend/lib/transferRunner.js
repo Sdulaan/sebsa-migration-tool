@@ -24,7 +24,8 @@ import {
   isParentSatisfied,
   isAlreadyExistsError
 } from './transactionLog'
-import { postEntityBatch, postCompanyHeaderBatch } from './migrationStore'
+import { postEntityBatch, postCompanyHeaderBatch, postSupplierStage } from './migrationStore'
+import { transferSupplierChildren } from './supplierTransfer'
 
 // Company has a real, confirmed-working create flow (CreateNewCompany, header
 // fields only — see postCompanyHeaderBatch and its own duplicate check) that
@@ -32,7 +33,8 @@ import { postEntityBatch, postCompanyHeaderBatch } from './migrationStore'
 // registry entity uses. Its sub-entities (Address, Tax Control, ...), shown
 // in Review Data, aren't sent anywhere yet.
 const CUSTOM_POSTERS = {
-  company: postCompanyHeaderBatch
+  company: postCompanyHeaderBatch,
+  supplier: (env, config, records) => postSupplierStage(env, config, 'supplier_general_information', records)
 }
 
 function posterFor(entity) {
@@ -42,6 +44,7 @@ function posterFor(entity) {
 export const DEFAULT_CHUNK_SIZE = 50
 
 function classify(result) {
+  if (!result) return TX_STATUS.UNCONFIRMED
   if (result.httpStatus === null || result.httpStatus === undefined) {
     return result.local ? TX_STATUS.FAILED : TX_STATUS.UNCONFIRMED
   }
@@ -51,6 +54,7 @@ function classify(result) {
 }
 
 function messageFor(status, result) {
+  if (!result) return 'No identifiable individual response. Check the destination before retrying.'
   if (status === TX_STATUS.SUCCESS) return 'Created'
   if (status === TX_STATUS.UNCONFIRMED) {
     return `${result.error || 'No identifiable response'}. It may or may not have been created — check the destination before retrying.`
@@ -68,6 +72,7 @@ export async function runTransfer({
   recordsByEntity,
   destEnv,
   destConfig,
+  sourceConfig,
   chunkSize = DEFAULT_CHUNK_SIZE,
   onProgress = () => {},
   shouldCancel = () => false
@@ -124,19 +129,32 @@ export async function runTransfer({
         })
       } else {
         chunk.forEach(({ key, payload, order }, i) => {
-          const result = res.results[i]
+          const result = res.results?.[i]
           const status = classify(result)
           addLogEntry(log, {
             entity,
             key,
             status,
-            httpStatus: result.httpStatus,
+            httpStatus: result?.httpStatus ?? null,
             message: messageFor(status, result),
-            errorCode: result.errorCode,
+            errorCode: result?.errorCode ?? null,
             payload,
             order
           })
         })
+        if (entity.id === 'supplier') {
+          for (const [i, item] of chunk.entries()) {
+            const status = classify(res.results?.[i])
+            if (status !== TX_STATUS.SUCCESS && status !== TX_STATUS.ALREADY_EXISTS) continue
+            const supplier = records[item.order]
+            try {
+              await transferSupplierChildren({ supplier, sourceConfig, destEnv, destConfig, log, shouldCancel, chunkSize,
+                onProgress: ({ stageLabel }) => onProgress({ entityId: entity.id, sent: sent + chunk.length, toSend: toSend.length, stageLabel }) })
+            } catch (err) {
+              addLogEntry(log, { entity, key: `${item.key} / sub-records`, status: TX_STATUS.FAILED, message: `Supplier sub-record transfer failed: ${err.message}`, indexed: false })
+            }
+          }
+        }
       }
 
       sent += chunk.length

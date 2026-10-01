@@ -24,6 +24,7 @@
 //               names — check them against your tenant's API Explorer.
 
 import { SALES_PART_MIGRATION_FIELDS, PART_CATALOG_MIGRATION_FIELDS } from './migrationFields'
+import { supplierPayload } from './supplierApi'
 
 export const ENTITY_GROUPS = [
   { id: 'mandatory', label: 'Transfer Mandatory Data' },
@@ -134,7 +135,7 @@ const DEFINITIONS = [
     description: 'Supplier master records',
     group: 'basic',
     projection: 'SupplierHandling.svc',
-    entitySet: 'SupplierInfoSet',
+    entitySet: 'SupplierInfoGeneralSet',
     keyFields: ['SupplierId'],
     titleField: 'Name',
     references: [],
@@ -223,6 +224,7 @@ const SYSTEM_FIELD_NAMES = new Set([
 ])
 
 export function buildEntityPayload(entity, record) {
+  if (entity.id === 'supplier') return supplierPayload('supplier_general_information', record)
   if (entity.fields) {
     const picked = {}
     entity.fields.forEach((key) => {

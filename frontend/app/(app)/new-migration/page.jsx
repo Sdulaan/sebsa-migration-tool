@@ -40,6 +40,8 @@ import { reviewSubTabList, buildReviewSubTabs } from '../../../lib/reviewDetailM
 import { fetchCompanyReviewSubTabs, COMPANY_REVIEW_TABS } from '../../../lib/companyReviewData'
 import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../lib/transactionLog'
 import { runTransfer } from '../../../lib/transferRunner'
+import { fetchSupplierTree, supplierTreeTabs } from '../../../lib/supplierTransfer'
+import { SUPPLIER_STAGES } from '../../../lib/supplierApi'
 import { downloadTransactionLog } from '../../../lib/transactionLogExcel'
 import MigrationStepper from '../../../components/MigrationStepper'
 
@@ -70,7 +72,7 @@ const BASIC_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'basic')
 // One mock form control for the detail column. Uncontrolled (defaultValue /
 // defaultChecked): the form is remounted via `key` when the selection changes,
 // so each field shows its new value without per-field state wiring.
-function ReviewFormField({ field }) {
+function ReviewFormField({ field, readOnly = false }) {
   return (
     <div className="erp-field">
       <label>{field.label}</label>
@@ -88,7 +90,7 @@ function ReviewFormField({ field }) {
           <span className="erp-toggle-track"><span className="erp-toggle-thumb" /></span>
         </label>
       ) : (
-        <input type="text" defaultValue={field.value == null ? '' : String(field.value)} />
+        <input type="text" defaultValue={field.value == null ? '' : String(field.value)} readOnly={readOnly} />
       )}
     </div>
   )
@@ -109,11 +111,12 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
   const [liveLoading, setLiveLoading] = useState(false)
   const [liveError, setLiveError] = useState(null)
 
-  const isLiveEntity = entity.id === 'company'
+  const isLiveEntity = entity.id === 'company' || entity.id === 'supplier'
   // Company's tab list is fixed to match the real IFS Aurena page (see
   // companyReviewData.js) — not the Excel-generated 24-tab schema
   // reviewSubTabList() would otherwise show.
-  const subTabList = isLiveEntity ? COMPANY_REVIEW_TABS : reviewSubTabList(entity)
+  const subTabList = entity.id === 'company' ? COMPANY_REVIEW_TABS : entity.id === 'supplier'
+    ? SUPPLIER_STAGES.map(({ id, label }) => ({ tabId: id, tabName: label })) : reviewSubTabList(entity)
   const selectedRecord = selectedRecordId != null ? records[selectedRecordId] : null
 
   useEffect(() => {
@@ -125,11 +128,18 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
     let cancelled = false
     setLiveLoading(true)
     setLiveError(null)
-    fetchCompanyReviewSubTabs(selectedRecord).then((result) => {
+    const request = entity.id === 'supplier'
+      ? fetchSupplierTree(selectedRecord, getEnvironmentConfig(SOURCE_ENV)).then((tree) => ({ success: true, subTabs: supplierTreeTabs(tree) }))
+      : fetchCompanyReviewSubTabs(selectedRecord)
+    request.then((result) => {
       if (cancelled) return
       setLiveLoading(false)
       if (result.success) setLiveSubTabs(result.subTabs)
       else setLiveError(result.error)
+    }).catch((err) => {
+      if (cancelled) return
+      setLiveLoading(false)
+      setLiveError(err.message)
     })
     return () => {
       cancelled = true
@@ -264,7 +274,7 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
                     <h4>{section.title}</h4>
                     <div className="erp-grid">
                       {section.fields.map((field) => (
-                        <ReviewFormField key={field.id} field={field} />
+                        <ReviewFormField key={field.id} field={field} readOnly={isLiveEntity} />
                       ))}
                     </div>
                   </section>
@@ -301,6 +311,8 @@ export default function NewMigrationPage() {
   const [fetchErrors, setFetchErrors] = useState({})
   const [transferLog, setTransferLog] = useState(null)
   const [transferProgress, setTransferProgress] = useState(null)
+  const [transferError, setTransferError] = useState('')
+  const [historyError, setHistoryError] = useState('')
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState('')
   const [confirmTransferOpen, setConfirmTransferOpen] = useState(false)
@@ -512,39 +524,52 @@ export default function NewMigrationPage() {
     cancelRequested.current = false
     setLoading(true)
     setTransferLog(null)
+    setTransferError('')
+    setHistoryError('')
     setDownloadError('')
     setTransferProgress({ summary: summarizeLog(log), entityId: entities[0]?.id, sent: 0, toSend: 0 })
     setStep(3)
 
-    await runTransfer({
-      log,
-      entityIds: entities.map((e) => e.id),
-      recordsByEntity,
-      destEnv: DEST_ENV,
-      destConfig,
-      shouldCancel: () => cancelRequested.current,
-      onProgress: (progress) => setTransferProgress({ ...progress, summary: summarizeLog(log) })
-    })
+    try {
+      await runTransfer({
+        log,
+        entityIds: entities.map((e) => e.id),
+        recordsByEntity,
+        destEnv: DEST_ENV,
+        destConfig,
+        sourceConfig,
+        shouldCancel: () => cancelRequested.current,
+        onProgress: (progress) => setTransferProgress({ ...progress, summary: summarizeLog(log) })
+      })
 
-    const { entities: counts, totals } = summarizeLog(log)
-    saveHistoryEntry({
-      id: Number(log.runId),
-      fromEnv,
-      toEnv,
-      // An entity counts as transferred (for the "transferred" marker and the
-      // dashboard) by the records that are now in the destination.
-      entities: counts
-        .map((c) => ({ id: c.id, label: c.label, total: c.SUCCESS + c.ALREADY_EXISTS }))
-        .filter((c) => c.total > 0),
-      totalRecords: totals.SUCCESS,
-      counts: totals,
-      completedAt: log.finishedAt,
-      status: totals.total === totals.SUCCESS + totals.ALREADY_EXISTS ? 'Completed' : 'Completed with errors'
-    })
-    setTransferLog(log)
-    setTransferProgress(null)
-    refreshTransferredEntities()
-    setLoading(false)
+      const { entities: counts, totals } = summarizeLog(log)
+      try {
+        saveHistoryEntry({
+          id: Number(log.runId),
+          fromEnv,
+          toEnv,
+          // An entity counts as transferred (for the "transferred" marker and the
+          // dashboard) by the records that are now in the destination.
+          entities: counts
+            .map((c) => ({ id: c.id, label: c.label, total: c.SUCCESS + c.ALREADY_EXISTS }))
+            .filter((c) => c.total > 0),
+          totalRecords: totals.SUCCESS,
+          counts: totals,
+          completedAt: log.finishedAt,
+          status: totals.total === totals.SUCCESS + totals.ALREADY_EXISTS ? 'Completed' : 'Completed with errors'
+        })
+        refreshTransferredEntities()
+      } catch (err) {
+        setHistoryError(`Transfer finished, but the history summary could not be saved: ${err.message}. Download the transaction log for the full results.`)
+      }
+    } catch (err) {
+      log.finishedAt = new Date().toISOString()
+      setTransferError(`Transfer stopped unexpectedly: ${err.message}. Check the destination before retrying any unconfirmed records.`)
+    } finally {
+      setTransferLog(log)
+      setTransferProgress(null)
+      setLoading(false)
+    }
   }
 
   async function handleDownloadLog() {
@@ -770,9 +795,10 @@ export default function NewMigrationPage() {
           <DialogTitle>Create records in the destination environment?</DialogTitle>
           <DialogContent>
             <p className="login-sub" style={{ marginTop: -4 }}>
-              This creates {totalSelected} record{totalSelected === 1 ? '' : 's'} in {toEnv}, one entity at a time in
+              This starts with {totalSelected} selected record{totalSelected === 1 ? '' : 's'} in {toEnv}, one entity at a time in
               this order: {orderEntitiesForTransfer(selectedEntities).map((e) => e.label).join(' → ')}. Records whose
-              parent record fails are skipped. You can download the full transaction log as Excel at the end.
+              parent record fails are skipped. {selectedRecordIds.supplier?.size > 0 ? 'Selected suppliers also include their child records from Source. ' : ''}
+              You can download the full transaction log as Excel at the end.
             </p>
           </DialogContent>
           <DialogActions>
@@ -826,7 +852,7 @@ export default function NewMigrationPage() {
         <div className="panel">
           <h2>Transferring…</h2>
           <p className="login-sub" style={{ marginTop: -6 }}>
-            {entity ? `${entity.label}: ${transferProgress.sent} of ${transferProgress.toSend} sent` : 'Starting…'}
+            {entity ? `${entity.label}${transferProgress.stageLabel ? ` / ${transferProgress.stageLabel}` : ''}: ${transferProgress.sent} of ${transferProgress.toSend} selected headers processed` : 'Starting…'}
           </p>
           {renderStatusCounts(transferProgress.summary)}
           <div className="actions">
@@ -841,16 +867,18 @@ export default function NewMigrationPage() {
 
     const summary = summarizeLog(transferLog)
     const { totals } = summary
-    const clean = totals.total === totals.SUCCESS + totals.ALREADY_EXISTS
+    const clean = !transferError && totals.total === totals.SUCCESS + totals.ALREADY_EXISTS
     return (
       <div className="panel">
         <span className={`badge ${clean ? 'HIGH' : 'MEDIUM'}`} style={{ marginBottom: 10 }}>
-          {clean ? 'Completed' : 'Completed with errors'}
+          {transferError ? 'Interrupted' : clean ? 'Completed' : 'Completed with errors'}
         </span>
-        <h2>Transfer finished</h2>
+        <h2>{transferError ? 'Transfer interrupted' : 'Transfer finished'}</h2>
+        {transferError && <div className="auth-banner error"><ErrorOutlineIcon fontSize="small" /><span>{transferError}</span></div>}
+        {historyError && <div className="auth-banner warning"><ErrorOutlineIcon fontSize="small" /><span>{historyError}</span></div>}
         <p>
           {totals.SUCCESS} created, {totals.ALREADY_EXISTS} already existed, {totals.FAILED} failed,{' '}
-          {totals.SKIPPED} skipped and {totals.UNCONFIRMED} unconfirmed, out of {totals.total} records sent
+          {totals.SKIPPED} skipped and {totals.UNCONFIRMED} unconfirmed, across {totals.total} logged outcomes
           from {transferLog.fromEnv} to {transferLog.toEnv}.
         </p>
         {renderStatusCounts(summary)}

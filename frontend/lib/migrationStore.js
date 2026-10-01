@@ -596,6 +596,14 @@ export async function postEntityBatch(entityId, env, config, records) {
   return callIfsRoute('/api/ifs/batch', env, config, { entity: entityId, records })
 }
 
+export async function fetchSupplierStage(env, config, stage, parent) {
+  return callIfsRoute('/api/ifs/supplier', env, config, { action: 'get', stage, parent })
+}
+
+export async function postSupplierStage(env, config, stage, records, routes = []) {
+  return callIfsRoute('/api/ifs/supplier', env, config, { action: 'create', stage, records, routes })
+}
+
 // IFS OData responses carry internal/technical bookkeeping fields alongside
 // the real business data (row versioning, Lu metadata, etc.) — not meaningful
 // to show in the UI, so they're filtered out before display.
