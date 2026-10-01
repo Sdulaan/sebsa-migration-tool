@@ -10,11 +10,25 @@
 
 import { recordsToSections } from './companyReviewData'
 import { pickPayloadFields } from './migrationFields'
+import { humanizeFieldName } from './migrationStore'
 
 const TABS = [{ tabId: 'general', tabName: 'General' }]
 
 // A titled section for one subset of the record's fields.
-function section(title, fields, emptyTitle) {
+function section(title, fields, emptyTitle, showAll = false) {
+  if (showAll) {
+    const entries = Object.entries(fields)
+    return entries.length === 0 ? { title: emptyTitle, fields: [] } : {
+      title,
+      fields: entries.map(([key, value], i) => ({
+        id: `${key}-${i}`,
+        label: humanizeFieldName(key),
+        type: typeof value === 'boolean' ? 'toggle' : 'text',
+        value: value == null ? '' : value,
+        readOnly: true
+      }))
+    }
+  }
   const [built] = recordsToSections([fields], null, emptyTitle)
   return Object.keys(fields).length === 0 ? { title: emptyTitle, fields: [] } : { ...built, title }
 }
@@ -32,7 +46,7 @@ export function allowListReview(allowList, fixedValues = null) {
     const other = Object.fromEntries(Object.entries(record).filter(([key]) => !allowed.has(key)))
 
     const sections = [
-      section(`Transferred to IFS (${Object.keys(transferred).length} fields)`, transferred, 'Transferred to IFS — none of the fields are present'),
+      section(`Transferred to IFS (${Object.keys(transferred).length} fields)`, transferred, 'Transferred to IFS — none of the fields are present', true),
       section('Other fields (not transferred)', other, 'Other fields — none')
     ]
     // recordsToSections drops IFS bookkeeping fields (@odata.*, objid, …), so

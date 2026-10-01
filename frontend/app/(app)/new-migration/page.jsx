@@ -98,7 +98,7 @@ function initialSubItems(entity, records) {
   return Object.fromEntries(records.map((_, index) => [index, new Set(entity.subMenu)]))
 }
 
-const MANDATORY_ENTITIES =AVAILABLE_ENTITIES.filter((e) => e.group === 'mandatory')
+const MANDATORY_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'mandatory')
 const BASIC_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'basic')
 
 // One mock form control for the detail column. Uncontrolled (defaultValue /
@@ -139,7 +139,7 @@ function ReviewFormField({ field, readOnly = false }) {
 // by entity id in the parent, so switching category resets the selection back
 // to the empty state. Sub-tabs are vertical items inside an explicitly
 // expanded record; checking a record selects its detail without opening them.
-function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRecord, onToggleSelectAll }) {
+function ReviewAccordion({ entity, records, selectedIds, allSelected, selectionDisabled, onToggleRecord, onToggleSelectAll }) {
   const [expandedRecordId, setExpandedRecordId] = useState(null)
   const [selectedRecordId, setSelectedRecordId] = useState(null)
   const [selectedSubTabId, setSelectedSubTabId] = useState(null)
@@ -165,6 +165,7 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
       return
     }
     let cancelled = false
+    setLiveSubTabs(null)
     setLiveLoading(true)
     setLiveError(null)
 
@@ -225,7 +226,7 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
       <div className="erp-records">
         <div className="erp-records-head">
           <span className="erp-records-title">{entity.label} Records</span>
-          <button type="button" className="secondary" onClick={onToggleSelectAll}>
+          <button type="button" className="secondary" onClick={onToggleSelectAll} disabled={selectionDisabled}>
             {allSelected ? 'Deselect all' : 'Select all'}
           </button>
         </div>
@@ -240,6 +241,7 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
                     type="checkbox"
                     className="erp-record-check"
                     checked={isChecked}
+                    disabled={selectionDisabled}
                     onChange={() => handleCheckboxChange(index)}
                     onClick={(e) => e.stopPropagation()}
                     aria-label="Select for transfer"
@@ -392,32 +394,63 @@ export default function NewMigrationPage() {
   async function fetchGroup(entityIds) {
     if (entityIds.length === 0) return
     setLoading(true)
-    // Records are identified in the review list by their index in the fetched
-    // list — source keys aren't guaranteed unique or even present.
-    const sourceConfig = getEnvironmentConfig(SOURCE_ENV)
-    const fetched = await Promise.all(entityIds.map((id) => fetchEntityRecords(id, SOURCE_ENV, sourceConfig)))
-    const result = {}
-    const errors = {}
-    const initialSelection = {}
-    const subItems = {}
-    entityIds.forEach((id, i) => {
-      const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
-      if (!fetched[i].success) {
-        errors[id] = fetched[i].error
-        return
-      }
-      result[id] = entityData(fetched[i])
-      // Records start UNCHECKED — the user ticks the ones to transfer.
-      initialSelection[id] = new Set()
-      if (entity.subMenu) subItems[id] = initialSubItems(entity, fetched[i].records)
-    })
-    setFetchErrors(errors)
-    setDataMap((prev) => ({ ...prev, ...result }))
-    setSelectedRecordIds((prev) => ({ ...prev, ...initialSelection }))
-    setSelectedSubItems((prev) => ({ ...prev, ...subItems }))
-    setExpandedRecords(new Set())
-    setActiveEntityId(entityIds.find((id) => result[id]) || null)
-    setLoading(false)
+    try {
+      // Record indices can change on every fetch, so clear previous selections.
+      const sourceConfig = getEnvironmentConfig(SOURCE_ENV)
+      const fetched = await Promise.all(entityIds.map((id) => fetchEntityRecords(id, SOURCE_ENV, sourceConfig)))
+      const result = {}
+      const errors = {}
+      const initialSelection = {}
+      const subItems = {}
+      entityIds.forEach((id, i) => {
+        const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
+        if (!fetched[i].success) {
+          errors[id] = fetched[i].error || 'Failed to fetch records.'
+          return
+        }
+        result[id] = entityData(fetched[i])
+        initialSelection[id] = new Set()
+        if (entity.subMenu) subItems[id] = initialSubItems(entity, fetched[i].records)
+      })
+      setFetchErrors(errors)
+      setDataMap((prev) => {
+        const next = { ...prev, ...result }
+        entityIds.filter((id) => !result[id]).forEach((id) => { delete next[id] })
+        return next
+      })
+      setSelectedRecordIds((prev) => {
+        const next = { ...prev, ...initialSelection }
+        entityIds.filter((id) => !result[id]).forEach((id) => { delete next[id] })
+        return next
+      })
+      setSelectedSubItems((prev) => {
+        const next = { ...prev, ...subItems }
+        entityIds.filter((id) => !result[id]).forEach((id) => { delete next[id] })
+        return next
+      })
+      setExpandedRecords(new Set())
+      setActiveEntityId(entityIds.find((id) => result[id]) || null)
+    } catch (err) {
+      setFetchErrors(Object.fromEntries(entityIds.map((id) => [id, err.message || 'Failed to fetch records.'])))
+      setDataMap((prev) => {
+        const next = { ...prev }
+        entityIds.forEach((id) => { delete next[id] })
+        return next
+      })
+      setSelectedRecordIds((prev) => {
+        const next = { ...prev }
+        entityIds.forEach((id) => { delete next[id] })
+        return next
+      })
+      setSelectedSubItems((prev) => {
+        const next = { ...prev }
+        entityIds.forEach((id) => { delete next[id] })
+        return next
+      })
+      setActiveEntityId(null)
+    } finally {
+      setLoading(false)
+    }
   }
 
   // Re-fetches one entity from the Source, like the live-data pages' Refresh.
@@ -426,23 +459,30 @@ export default function NewMigrationPage() {
   // error shown above the list.
   async function refreshEntity(id) {
     setRefreshingId(id)
-    const fetched = await fetchEntityRecords(id, SOURCE_ENV, getEnvironmentConfig(SOURCE_ENV))
-    setFetchErrors((prev) => {
-      const next = { ...prev }
-      delete next[id]
-      if (!fetched.success) next[id] = fetched.error
-      return next
-    })
-    if (fetched.success) {
-      const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
-      setDataMap((prev) => ({ ...prev, [id]: entityData(fetched) }))
+    try {
+      const fetched = await fetchEntityRecords(id, SOURCE_ENV, getEnvironmentConfig(SOURCE_ENV))
+      setFetchErrors((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        if (!fetched.success) next[id] = fetched.error || 'Failed to refresh records.'
+        return next
+      })
       setSelectedRecordIds((prev) => ({ ...prev, [id]: new Set() }))
-      if (entity.subMenu) setSelectedSubItems((prev) => ({ ...prev, [id]: initialSubItems(entity, fetched.records) }))
+      if (fetched.success) {
+        const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
+        setDataMap((prev) => ({ ...prev, [id]: entityData(fetched) }))
+        if (entity.subMenu) setSelectedSubItems((prev) => ({ ...prev, [id]: initialSubItems(entity, fetched.records) }))
+      }
+    } catch (err) {
+      setFetchErrors((prev) => ({ ...prev, [id]: err.message || 'Failed to refresh records.' }))
+      setSelectedRecordIds((prev) => ({ ...prev, [id]: new Set() }))
+    } finally {
+      setRefreshingId(null)
     }
-    setRefreshingId(null)
   }
 
   function toggleRecord(entityId, recordId) {
+    if (fetchErrors[entityId]) return
     setSelectedRecordIds((prev) => {
       const next = new Set(prev[entityId])
       if (next.has(recordId)) next.delete(recordId)
@@ -452,6 +492,7 @@ export default function NewMigrationPage() {
   }
 
   function toggleSelectAllForEntity(entityId) {
+    if (fetchErrors[entityId]) return
     const allIds = dataMap[entityId].records.map((_, index) => index)
     const allSelected = selectedRecordIds[entityId]?.size === allIds.length
     setSelectedRecordIds((prev) => ({
@@ -594,7 +635,7 @@ export default function NewMigrationPage() {
     return (
       <div className="review-entity">
         {/* The entity on screen: the GET it came from, its count, and Refresh. */}
-         {/*<div className="review-entity-bar">
+        <div className="review-entity-bar">
           <div className="review-entity-bar-info">
             <strong>{displayEntity.label}</strong>
             <span className="live-data-count">
@@ -611,7 +652,7 @@ export default function NewMigrationPage() {
             <RefreshIcon fontSize="small" />
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
-        </div>*/}
+        </div>
 
         <div className="erp-layout">
           {/* Column 1 — category sidebar (fetched entities) */}
@@ -641,6 +682,7 @@ export default function NewMigrationPage() {
             records={displayData.records}
             selectedIds={displaySelectedIds}
             allSelected={displayAllSelected}
+            selectionDisabled={Boolean(fetchErrors[displayEntityId])}
             onToggleRecord={(index) => toggleRecord(displayEntityId, index)}
             onToggleSelectAll={() => toggleSelectAllForEntity(displayEntityId)}
           />
