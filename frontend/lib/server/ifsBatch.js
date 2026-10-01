@@ -15,17 +15,32 @@ function validateObject(record) {
 // `skipped`; `recordMap` is keyed by each record's Content-ID so the response
 // can be matched back to it. `body` is null when nothing valid is left to send.
 export function buildODataBatch(entitySet, records, validate = validateObject) {
+  const requests = records.map((record, index) => {
+    const problem = validateObject(record) || validate(record, index)
+    if (problem) return { error: problem, record }
+    try {
+      return { method: 'POST', url: typeof entitySet === 'function' ? entitySet(record, index) : entitySet, record }
+    } catch (err) {
+      return { error: err.message, record }
+    }
+  })
+  return buildODataBatchRequests(requests)
+}
+
+// The general form: one changeset per request, each with its own method,
+// service-relative URL, JSON body and extra headers (e.g. If-Match for a
+// PATCH). A request carrying `error` is left out and returned in `skipped`.
+export function buildODataBatchRequests(requests) {
   const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
   const boundary = `batch_${suffix}`
   const lines = []
   const recordMap = {}
   const skipped = []
 
-  records.forEach((record, index) => {
+  requests.forEach((request, index) => {
     const id = index + 1
-    const problem = validateObject(record) || validate(record, index)
-    if (problem) {
-      skipped.push({ index, error: problem, record })
+    if (request.error) {
+      skipped.push({ index, error: request.error, record: request.record })
       return
     }
 
@@ -39,15 +54,16 @@ export function buildODataBatch(entitySet, records, validate = validateObject) {
       'Content-Transfer-Encoding: binary',
       `Content-ID: ${id}`,
       '',
-      `POST ${typeof entitySet === 'function' ? entitySet(record, index) : entitySet} HTTP/1.1`,
+      `${request.method} ${request.url} HTTP/1.1`,
       'Content-Type: application/json',
       'Accept: application/json',
+      ...Object.entries(request.headers || {}).map(([name, value]) => `${name}: ${value}`),
       '',
-      JSON.stringify(record),
+      JSON.stringify(request.record),
       '',
       `--${changeset}--`
     )
-    recordMap[id] = { originalIndex: index, record }
+    recordMap[id] = { originalIndex: index, record: request.record }
   })
 
   if (Object.keys(recordMap).length === 0) return { body: null, boundary, recordMap, skipped }

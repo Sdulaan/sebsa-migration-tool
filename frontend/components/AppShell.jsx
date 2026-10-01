@@ -8,6 +8,7 @@ import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined'
 import AddCircleOutlinedIcon from '@mui/icons-material/AddCircleOutlined'
 import HistoryIcon from '@mui/icons-material/History'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
+import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined'
 
 export default function AppShell({ children }) {
   const pathname = usePathname()
@@ -35,6 +36,9 @@ export default function AppShell({ children }) {
           </Link>
           <Link href="/new-migration" className={pathname === '/new-migration' ? 'active' : ''}>
             <AddCircleOutlinedIcon fontSize="small" /> New Transfer
+          </Link>
+          <Link href="/configuration" className={pathname === '/configuration' ? 'active' : ''}>
+            <TuneOutlinedIcon fontSize="small" /> Configuration
           </Link>
           <Link href="/history" className={pathname === '/history' ? 'active' : ''}>
             <HistoryIcon fontSize="small" /> Transfer History
