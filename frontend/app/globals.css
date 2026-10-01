@@ -384,3 +384,73 @@ main:has(.review-screen) > *:not(.review-screen){flex:0 0 auto}
   .review-screen-body .erp-records,
   .review-screen-body .erp-detail{height:auto}
 }
+
+/* Tablet and phone layouts. Desktop rules above remain the default. */
+@media(max-width:900px){
+  .shell > aside{position:relative;height:auto;padding:14px 22px 0;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:0 12px;border-right:0;border-bottom:1px solid var(--border)}
+  .shell > aside .brand{min-width:0}
+  .shell > aside .notice{grid-column:2;grid-row:1;margin:0}
+  .shell > aside .sign-out-btn{width:auto!important;min-height:40px;padding:8px 12px!important}
+  .shell > aside nav{grid-column:1/-1;grid-row:2;min-width:0;margin:10px -22px 0;padding:0 22px 8px;scrollbar-width:thin;overscroll-behavior-x:contain}
+  .shell > aside nav a{min-height:44px}
+  .shell > main{min-width:0}
+  .migration-stepper{overflow-x:auto;overflow-y:hidden;padding-bottom:8px;scrollbar-width:thin}
+  .migration-stepper .MuiStep-root{min-width:110px}
+  .live-data-layout{grid-template-columns:minmax(190px,34%) minmax(0,1fr)}
+  .live-data-detail-grid,.erp-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))}
+  .config-layout{grid-template-columns:minmax(180px,30%) minmax(0,1fr)}
+  .erp-categories{flex-wrap:nowrap;overflow-x:auto;min-width:0;scrollbar-width:thin}
+  .erp-cat-item{flex:0 0 auto;min-height:44px}
+  .erp-records-scroll{max-height:300px}
+  .erp-detail{overflow:visible}
+  .review-screen-body .erp-records-scroll{max-height:300px}
+  .review-screen-body .erp-detail{overflow:visible}
+  .table-wrap{max-width:100%;overscroll-behavior-x:contain}
+}
+@media(max-width:720px){
+  .live-data-layout{grid-template-columns:1fr}
+  .live-data-list{min-height:0;max-height:240px;border-right:0;border-bottom:1px solid var(--border)}
+  .live-data-detail{min-height:0;max-height:none;padding:18px}
+  .config-layout{grid-template-columns:1fr}
+  .config-sidebar{min-width:0;flex-direction:row;flex-wrap:nowrap;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border)}
+  .config-nav-item{flex:0 0 auto;min-height:44px}
+  .config-content{padding:18px;min-width:0}
+  .column-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:520px){
+  .shell > aside{padding:12px 16px 0}
+  .shell > aside nav{margin:9px -16px 0;padding:0 16px 8px}
+  .shell > aside nav a{font-size:13px;padding:10px}
+  .shell > aside .brand-logo{max-width:min(44vw,160px);height:auto;max-height:30px}
+  .shell > main{padding:16px}
+  main > header{gap:14px}
+  main > header .button{width:100%;justify-content:center}
+  .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stat-card-head{align-items:center}
+  .stat-card-icon{width:32px;height:32px}
+  .cards .stat-card strong{font-size:22px;overflow-wrap:anywhere}
+  .cards .stat-card strong.stat-card-value-sm{font-size:15px}
+  .panel{min-width:0}
+  .panel[style*="padding: 32px"]{padding:18px!important}
+  .history-row{flex-wrap:wrap}
+  .history-row .badge{margin-left:0}
+  .actions{justify-content:stretch}
+  .actions > button,.actions > .button{flex:1 1 100%;min-width:0;justify-content:center;text-align:center;white-space:normal}
+  .env-form-pair{grid-template-columns:1fr}
+  .column-grid{grid-template-columns:1fr}
+  .column-card{min-height:64px}
+  .group-layout{gap:18px}
+  .erp-categories{padding:8px}
+  .erp-records-head{flex-wrap:wrap}
+  .erp-records-scroll,.review-screen-body .erp-records-scroll{max-height:240px}
+  .erp-detail-header{padding:16px}
+  .erp-form{padding:16px;gap:12px}
+  .erp-card{padding:15px}
+  .erp-grid{grid-template-columns:1fr}
+  .live-data-detail-grid{grid-template-columns:1fr}
+  .live-data-toolbar{flex-wrap:wrap}
+  .record-submenu{padding-left:24px}
+  .security-summary span,.auth-banner span,.error{overflow-wrap:anywhere}
+  .login-page{padding:16px}
+  .login-card{padding:26px 18px}
+}
