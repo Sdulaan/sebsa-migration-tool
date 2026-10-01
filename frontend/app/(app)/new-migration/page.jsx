@@ -18,6 +18,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import SellOutlinedIcon from '@mui/icons-material/SellOutlined'
+import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined'
 import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined'
 import ViewSidebarOutlinedIcon from '@mui/icons-material/ViewSidebarOutlined'
 import {
@@ -39,16 +40,26 @@ import { AVAILABLE_ENTITIES, orderEntitiesForTransfer, recordKey } from '../../.
 import { reviewSubTabList, buildReviewSubTabs } from '../../../lib/reviewDetailMock'
 import { fetchCompanyReviewSubTabs, COMPANY_REVIEW_TABS } from '../../../lib/companyReviewData'
 import { fetchSiteReviewSubTabs, SITE_REVIEW_TABS } from '../../../lib/siteReviewData'
-import { fetchPartCatalogReviewSubTabs, PART_CATALOG_REVIEW_TABS } from '../../../lib/partCatalogReviewData'
+import { allowListReview } from '../../../lib/partReviewData'
+
+// The part entities' Review Data shows the registry's own POST allow-list, so
+// "Transferred to IFS" is exactly what the Transfer step sends.
+const partReview = (id) => {
+  const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
+  return allowListReview(entity.fields, entity.fixedValues)
+}
 
 // Entities whose Review Data sub-tabs are real data rather than the
 // reviewDetailMock.js mock: a fixed tab list, and the function that fills it
 // for one record (companyReviewData.js / siteReviewData.js /
-// partCatalogReviewData.js).
+// partReviewData.js).
 const LIVE_REVIEW_ENTITIES = {
   company: { tabs: COMPANY_REVIEW_TABS, fetchSubTabs: fetchCompanyReviewSubTabs },
   site: { tabs: SITE_REVIEW_TABS, fetchSubTabs: fetchSiteReviewSubTabs },
-  masterPart: { tabs: PART_CATALOG_REVIEW_TABS, fetchSubTabs: fetchPartCatalogReviewSubTabs }
+  masterPart: partReview('masterPart'),
+  inventoryPart: partReview('inventoryPart'),
+  purchasePart: partReview('purchasePart'),
+  salesPart: partReview('salesPart')
 }
 import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../lib/transactionLog'
 import { runTransfer } from '../../../lib/transferRunner'
@@ -63,6 +74,7 @@ const ENTITY_ICONS = {
   customer: PersonOutlineOutlinedIcon,
   masterPart: Inventory2OutlinedIcon,
   inventoryPart: CategoryOutlinedIcon,
+  purchasePart: ShoppingCartOutlinedIcon,
   salesPart: SellOutlinedIcon,
   supplier: LocalShippingOutlinedIcon,
   inventoryLocations: WarehouseOutlinedIcon
@@ -1077,6 +1089,33 @@ export default function NewMigrationPage() {
             >
               <CloudDownloadOutlinedIcon fontSize="small" />
               Get live data (SalesPartSet)
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => router.push(`/new-migration/part-catalog-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (PartCatalogSet)
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => router.push(`/new-migration/inventory-part-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (InventoryPartSet)
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => router.push(`/new-migration/purchase-part-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
+              disabled={!fromEnv}
+            >
+              <CloudDownloadOutlinedIcon fontSize="small" />
+              Get live data (PurchasePartSet)
             </button>
             <button
               type="button"
