@@ -474,6 +474,13 @@ main:has(.review-screen) > *:not(.review-screen){flex:0 0 auto}
 .review-screen-body .erp-records-scroll{max-height:none}
 .review-screen-body .erp-detail{height:100%;max-height:none;overflow-y:auto}
 .review-screen-footer{flex:0 0 auto;margin:0}
+/* Entity bar (GET URL, record count, Refresh) above the three columns */
+.review-entity{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:10px}
+.review-screen-body .review-entity .erp-layout{height:auto}
+.review-entity-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface)}
+.review-entity-bar-info{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;min-width:0}
+.review-entity-bar-info small{flex-basis:100%;color:var(--text-muted);font-size:12px;word-break:break-all}
+.review-entity-bar .secondary{padding:7px 12px;font-size:13px;flex:0 0 auto}
 
 @media(max-width:900px){
   .erp-layout{grid-template-columns:1fr}
@@ -487,6 +494,8 @@ main:has(.review-screen) > *:not(.review-screen){flex:0 0 auto}
   main:has(.review-screen){height:auto;overflow:visible;display:block}
   .review-screen{display:block}
   .review-screen-body{display:block}
+  .review-entity{display:block}
+  .review-entity-bar{margin-bottom:10px}
   .review-screen-body .erp-layout,
   .review-screen-body .erp-categories,
   .review-screen-body .erp-records,
