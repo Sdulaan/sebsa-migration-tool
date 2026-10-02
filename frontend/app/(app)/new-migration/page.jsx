@@ -13,27 +13,21 @@ import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined'
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
-import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import SellOutlinedIcon from '@mui/icons-material/SellOutlined'
 import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined'
 import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined'
 import ViewSidebarOutlinedIcon from '@mui/icons-material/ViewSidebarOutlined'
+import RefreshIcon from '@mui/icons-material/Refresh'
+import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined'
 import {
   SOURCE_ENV,
   DEST_ENV,
-  GRANT_TYPES,
-  DEFAULT_ENV_CONFIG,
   fetchEntityRecords,
   saveHistoryEntry,
-  getEnvironmentConfigs,
   getEnvironmentConfig,
-  saveEnvironmentConfig,
-  testEnvironmentConnection,
-  suggestAuthPath,
-  getSessionToken,
+  getTransferEnvironments,
   getHistory
 } from '../../../lib/migrationStore'
 import { AVAILABLE_ENTITIES, orderEntitiesForTransfer, recordKey } from '../../../lib/entityRegistry'
@@ -67,7 +61,8 @@ import { runTransfer } from '../../../lib/transferRunner'
 import { downloadTransactionLog } from '../../../lib/transactionLogExcel'
 import MigrationStepper from '../../../components/MigrationStepper'
 
-const STEPS = ['Configuration', 'Select Entities', 'Review Data', 'Transfer']
+// Environments are set on the Configuration page (/configuration), not here.
+const STEPS = ['Select Entities', 'Review Data', 'Transfer']
 
 const ENTITY_ICONS = {
   company: ApartmentOutlinedIcon,
@@ -89,7 +84,18 @@ function recordTitle(entity, record) {
   return title === null || title === undefined || title === '' ? recordKey(entity, record) : String(title)
 }
 
-const MANDATORY_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'mandatory')
+// dataMap entry for one entity's successful fetch. `fetchedAt` changes on
+// every fetch, so the review list remounts with fresh state after a Refresh.
+function entityData(fetched) {
+  return { records: fetched.records, total: fetched.records.length, url: fetched.url, fetchedAt: Date.now() }
+}
+
+// Sub-menu items start fully selected for every record.
+function initialSubItems(entity, records) {
+  return Object.fromEntries(records.map((_, index) => [index, new Set(entity.subMenu)]))
+}
+
+const MANDATORY_ENTITIES =AVAILABLE_ENTITIES.filter((e) => e.group === 'mandatory')
 const BASIC_ENTITIES = AVAILABLE_ENTITIES.filter((e) => e.group === 'basic')
 
 // One mock form control for the detail column. Uncontrolled (defaultValue /
@@ -178,8 +184,15 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
   const selectedSubTab = subTabs.find((t) => t.tabId === selectedSubTabId) || null
   const hasSelection = Boolean(selectedRecord && (selectedSubTab || (isLiveEntity && (liveLoading || liveError))))
 
+  // Opening a record also shows its first sub-tab straight away, as the
+  // live-data pages do; reopening the record already shown keeps its sub-tab.
   function toggleExpand(index) {
-    setExpandedRecordId((prev) => (prev === index ? null : index))
+    const opening = expandedRecordId !== index
+    setExpandedRecordId(opening ? index : null)
+    if (opening && selectedRecordId !== index) {
+      setSelectedRecordId(index)
+      setSelectedSubTabId(subTabList[0]?.tabId ?? null)
+    }
   }
 
   function selectSubTab(recordIndex, subTabId) {
@@ -358,14 +371,9 @@ export default function NewMigrationPage() {
   const [step, setStep] = useState(0)
   const [fromEnv, setFromEnv] = useState('')
   const [toEnv, setToEnv] = useState('')
-  const [envModalOpen, setEnvModalOpen] = useState(false)
-  const [modalTarget, setModalTarget] = useState('from') // 'from' | 'to'
-  const [envConfigs, setEnvConfigs] = useState({})
-  const [modalEnv, setModalEnv] = useState('')
-  const [authForm, setAuthForm] = useState(DEFAULT_ENV_CONFIG)
-  const [testStatus, setTestStatus] = useState('idle') // idle | testing | success | error
-  const [testMessage, setTestMessage] = useState('')
-  const [sessionTokenInfo, setSessionTokenInfo] = useState(null)
+  // null until the saved environments have been read (localStorage, so only
+  // after mount); then whether both are configured.
+  const [envReady, setEnvReady] = useState(null)
   const [selectedEntities, setSelectedEntities] = useState([])
   const [loading, setLoading] = useState(false)
   const [dataMap, setDataMap] = useState({})
@@ -374,6 +382,7 @@ export default function NewMigrationPage() {
   const [expandedRecords, setExpandedRecords] = useState(new Set())
   const [activeEntityId, setActiveEntityId] = useState(null)
   const [fetchErrors, setFetchErrors] = useState({})
+  const [refreshingId, setRefreshingId] = useState(null)
   const [transferLog, setTransferLog] = useState(null)
   const [transferProgress, setTransferProgress] = useState(null)
   const [downloading, setDownloading] = useState(false)
@@ -381,34 +390,6 @@ export default function NewMigrationPage() {
   const [confirmTransferOpen, setConfirmTransferOpen] = useState(false)
   const cancelRequested = useRef(false)
   const [transferredEntityIds, setTransferredEntityIds] = useState(new Set())
-
-  const sameEnv = fromEnv && toEnv && fromEnv === toEnv
-  const canProceedConfig = fromEnv && toEnv && !sameEnv
-
-  // fromEnv/toEnv are display labels (the configured Base URL host); settings
-  // themselves are stored under the fixed SOURCE_ENV / DEST_ENV keys.
-  function envLabel(baseUrl, fallback) {
-    try {
-      return new URL(baseUrl).host
-    } catch {
-      return baseUrl?.trim() || fallback
-    }
-  }
-
-  function envButtonStatus(env, role) {
-    const config = env ? envConfigs[role] : null
-    if (!env) return 'base'
-    if (sameEnv) return 'error'
-    if (config?.status === 'authorized') return 'success'
-    if (config?.status === 'error') return 'error'
-    return 'base'
-  }
-
-  const fromEnvStatus = envButtonStatus(fromEnv, SOURCE_ENV)
-  const toEnvStatus = envButtonStatus(toEnv, DEST_ENV)
-  const modalOtherEnv = modalTarget === 'from' ? toEnv : fromEnv
-  const modalLabel = envLabel(authForm.baseUrl, modalEnv)
-  const modalOtherLabel = modalTarget === 'from' ? 'destination' : 'source'
 
   // Scoped to the current from→to pair: an entity already sitting in a
   // different destination doesn't mean it exists in *this* one.
@@ -421,7 +402,10 @@ export default function NewMigrationPage() {
   }
 
   useEffect(() => {
-    setEnvConfigs(getEnvironmentConfigs())
+    const envs = getTransferEnvironments()
+    setFromEnv(envs.fromEnv)
+    setToEnv(envs.toEnv)
+    setEnvReady(envs.ready)
   }, [])
 
   useEffect(() => {
@@ -430,64 +414,6 @@ export default function NewMigrationPage() {
 
   function toggleEntity(id) {
     setSelectedEntities((prev) => (prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]))
-  }
-
-  function loadEnvIntoForm(env) {
-    const config = getEnvironmentConfig(env)
-    setModalEnv(env)
-    setAuthForm(config)
-    setTestStatus(config.status === 'authorized' ? 'success' : config.status === 'error' ? 'error' : 'idle')
-    setTestMessage(config.status === 'error' ? config.lastError || '' : '')
-    setSessionTokenInfo(getSessionToken(env))
-  }
-
-  function openEnvModal(target) {
-    setModalTarget(target)
-    loadEnvIntoForm(target === 'from' ? SOURCE_ENV : DEST_ENV)
-    setEnvModalOpen(true)
-  }
-
-  function updateAuthField(field, value) {
-    setAuthForm((prev) => {
-      const next = { ...prev, [field]: value }
-      // The authorization path follows the Base URL until the user edits it
-      // themselves (a hand-typed path is never overwritten).
-      if (field === 'baseUrl' && (!prev.authPath || prev.authPath === suggestAuthPath(prev.baseUrl))) {
-        next.authPath = suggestAuthPath(value)
-      }
-      return next
-    })
-    setTestStatus('idle')
-    setTestMessage('')
-  }
-
-  async function handleTestConnection() {
-    setTestStatus('testing')
-    const result = await testEnvironmentConnection(modalEnv, authForm)
-    if (result.success) {
-      setTestStatus('success')
-      setTestMessage(result.tokenPreview)
-      setSessionTokenInfo(getSessionToken(modalEnv))
-    } else {
-      setTestStatus('error')
-      setTestMessage(result.error)
-      setSessionTokenInfo(null)
-    }
-  }
-
-  function handleSaveEnvConfig() {
-    const status = testStatus === 'success' ? 'authorized' : testStatus === 'error' ? 'error' : 'unconfigured'
-    const saved = saveEnvironmentConfig(modalEnv, {
-      ...authForm,
-      status,
-      lastError: testStatus === 'error' ? testMessage : null,
-      lastTestedAt: testStatus === 'success' || testStatus === 'error' ? new Date().toISOString() : null
-    })
-    setEnvConfigs((prev) => ({ ...prev, [modalEnv]: saved }))
-    const label = envLabel(saved.baseUrl, modalEnv)
-    if (modalTarget === 'from') setFromEnv(label)
-    else setToEnv(label)
-    if (label !== modalOtherEnv) setEnvModalOpen(false)
   }
 
   async function fetchGroup(entityIds) {
@@ -500,31 +426,47 @@ export default function NewMigrationPage() {
     const result = {}
     const errors = {}
     const initialSelection = {}
-    const initialSubItems = {}
+    const subItems = {}
     entityIds.forEach((id, i) => {
       const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
       if (!fetched[i].success) {
         errors[id] = fetched[i].error
         return
       }
-      const records = fetched[i].records
-      result[id] = { records, total: records.length }
+      result[id] = entityData(fetched[i])
       // Records start UNCHECKED — the user ticks the ones to transfer.
       initialSelection[id] = new Set()
-      if (entity.subMenu) {
-        initialSubItems[id] = {}
-        records.forEach((_, index) => {
-          initialSubItems[id][index] = new Set(entity.subMenu)
-        })
-      }
+      if (entity.subMenu) subItems[id] = initialSubItems(entity, fetched[i].records)
     })
     setFetchErrors(errors)
     setDataMap((prev) => ({ ...prev, ...result }))
     setSelectedRecordIds((prev) => ({ ...prev, ...initialSelection }))
-    setSelectedSubItems((prev) => ({ ...prev, ...initialSubItems }))
+    setSelectedSubItems((prev) => ({ ...prev, ...subItems }))
     setExpandedRecords(new Set())
     setActiveEntityId(entityIds.find((id) => result[id]) || null)
     setLoading(false)
+  }
+
+  // Re-fetches one entity from the Source, like the live-data pages' Refresh.
+  // Its ticks are cleared: records are identified by list index, which a
+  // fresh fetch can shift. On failure the previous records stay, with the
+  // error shown above the list.
+  async function refreshEntity(id) {
+    setRefreshingId(id)
+    const fetched = await fetchEntityRecords(id, SOURCE_ENV, getEnvironmentConfig(SOURCE_ENV))
+    setFetchErrors((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      if (!fetched.success) next[id] = fetched.error
+      return next
+    })
+    if (fetched.success) {
+      const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
+      setDataMap((prev) => ({ ...prev, [id]: entityData(fetched) }))
+      setSelectedRecordIds((prev) => ({ ...prev, [id]: new Set() }))
+      if (entity.subMenu) setSelectedSubItems((prev) => ({ ...prev, [id]: initialSubItems(entity, fetched.records) }))
+    }
+    setRefreshingId(null)
   }
 
   function toggleRecord(entityId, recordId) {
@@ -596,7 +538,7 @@ export default function NewMigrationPage() {
     setTransferLog(null)
     setDownloadError('')
     setTransferProgress({ summary: summarizeLog(log), entityId: entities[0]?.id, sent: 0, toSend: 0 })
-    setStep(3)
+    setStep(2)
 
     await runTransfer({
       log,
@@ -645,8 +587,6 @@ export default function NewMigrationPage() {
 
   function resetAll() {
     setStep(0)
-    setFromEnv('')
-    setToEnv('')
     setSelectedEntities([])
     setDataMap({})
     setSelectedRecordIds({})
@@ -670,38 +610,62 @@ export default function NewMigrationPage() {
 
     if (fetchedIds.length === 0 || !displayEntity) return null
 
-    return (
-      <div className="erp-layout">
-        {/* Column 1 — category sidebar (fetched entities) */}
-        <aside className="erp-categories">
-          {fetchedIds.map((id) => {
-            const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
-            const Icon = ENTITY_ICONS[id]
-            return (
-              <button
-                type="button"
-                key={id}
-                className={`erp-cat-item ${displayEntityId === id ? 'active' : ''}`}
-                onClick={() => setActiveEntityId(id)}
-              >
-                {Icon && <Icon className="erp-cat-icon" fontSize="small" />}
-                <span className="erp-cat-label">{entity.label}</span>
-                <span className="erp-cat-count">{dataMap[id].total}</span>
-              </button>
-            )
-          })}
-        </aside>
+    const refreshing = refreshingId === displayEntityId
 
-        {/* Columns 2 & 3 — record accordion + detail form */}
-        <ReviewAccordion
-          key={displayEntityId}
-          entity={displayEntity}
-          records={displayData.records}
-          selectedIds={displaySelectedIds}
-          allSelected={displayAllSelected}
-          onToggleRecord={(index) => toggleRecord(displayEntityId, index)}
-          onToggleSelectAll={() => toggleSelectAllForEntity(displayEntityId)}
-        />
+    return (
+      <div className="review-entity">
+        {/* The entity on screen: the GET it came from, its count, and Refresh. */}
+         {/*<div className="review-entity-bar">
+          <div className="review-entity-bar-info">
+            <strong>{displayEntity.label}</strong>
+            <span className="live-data-count">
+              {displayData.total} record{displayData.total === 1 ? '' : 's'} found
+            </span>
+            {displayData.url && <small>GET {displayData.url}</small>}
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => refreshEntity(displayEntityId)}
+            disabled={Boolean(refreshingId) || loading}
+          >
+            <RefreshIcon fontSize="small" />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>*/}
+
+        <div className="erp-layout">
+          {/* Column 1 — category sidebar (fetched entities) */}
+          <aside className="erp-categories">
+            {fetchedIds.map((id) => {
+              const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
+              const Icon = ENTITY_ICONS[id]
+              return (
+                <button
+                  type="button"
+                  key={id}
+                  className={`erp-cat-item ${displayEntityId === id ? 'active' : ''}`}
+                  onClick={() => setActiveEntityId(id)}
+                >
+                  {Icon && <Icon className="erp-cat-icon" fontSize="small" />}
+                  <span className="erp-cat-label">{entity.label}</span>
+                  <span className="erp-cat-count">{dataMap[id].total}</span>
+                </button>
+              )
+            })}
+          </aside>
+
+          {/* Columns 2 & 3 — record accordion + detail form */}
+          <ReviewAccordion
+            key={`${displayEntityId}:${displayData.fetchedAt}`}
+            entity={displayEntity}
+            records={displayData.records}
+            selectedIds={displaySelectedIds}
+            allSelected={displayAllSelected}
+            onToggleRecord={(index) => toggleRecord(displayEntityId, index)}
+            onToggleSelectAll={() => toggleSelectAllForEntity(displayEntityId)}
+          />
+        </div>
       </div>
     )
   }
@@ -728,7 +692,7 @@ export default function NewMigrationPage() {
 
   async function handleFetchAndProceed() {
     await fetchGroup(selectedEntities)
-    setStep(2)
+    setStep(1)
   }
 
   function renderEntityCard(ent) {
@@ -760,7 +724,7 @@ export default function NewMigrationPage() {
       <>
         <div className="panel">
           <h2>Select entities</h2>
-          <p className="login-sub" style={{ marginTop: -6 }}>Choose the entities to transfer. Company and Site are required before other entities can be transferred.</p>
+          <p className="login-sub" style={{ marginTop: -6 }}>{fromEnv} → {toEnv}. Choose the entities to transfer. Company and Site are required before other entities can be transferred.</p>
 
           <div className="group-layout">
             <div className="group-main">
@@ -807,7 +771,7 @@ export default function NewMigrationPage() {
         </div>
 
         <div className="actions">
-          <button className="ghost" onClick={() => setStep(0)}>Back</button>
+          <button className="ghost" onClick={() => router.push('/configuration')}>Change environments</button>
           <button onClick={handleFetchAndProceed} disabled={!canProceed}>
             {loading ? 'Fetching…' : 'Fetch Data'}
           </button>
@@ -841,14 +805,14 @@ export default function NewMigrationPage() {
           </div>
 
           <div className="actions review-screen-footer">
-            <button className="ghost" onClick={() => setStep(1)}>Back</button>
-            <button onClick={() => setConfirmTransferOpen(true)} disabled={loading || totalSelected === 0}>
+            <button className="ghost" onClick={() => setStep(0)}>Back</button>
+            <button onClick={() => setConfirmTransferOpen(true)} disabled={loading || Boolean(refreshingId) || totalSelected === 0}>
               {loading ? 'Transferring…' : `Transfer ${totalSelected} records to IFS`}
             </button>
           </div>
         </div>
 
-        <Dialog open={confirmTransferOpen} onClose={() => setConfirmTransferOpen(false)} fullWidth maxWidth="sm">
+        <Dialog className="app-dialog" open={confirmTransferOpen} onClose={() => setConfirmTransferOpen(false)} fullWidth maxWidth="sm">
           <DialogTitle>Create records in the destination environment?</DialogTitle>
           <DialogContent>
             <p className="login-sub" style={{ marginTop: -4 }}>
@@ -966,224 +930,36 @@ export default function NewMigrationPage() {
         <div>
           <span className="eyebrow">NEW TRANSFER</span>
           <h1>Transfer data to IFS</h1>
-          <p>Configure the environments, select entities to transfer, review the data, then confirm the transfer.</p>
+          <p>Select entities to transfer, review the data, then confirm the transfer.</p>
         </div>
       </header>
 
-      <MigrationStepper steps={STEPS} activeStep={step} />
-
-      {step === 0 && (
+      {envReady === false && (
         <div className="panel">
-          <h2>Configure Transfer</h2>
-          <p className="login-sub" style={{ marginTop: -6 }}>Select the source and destination environments.</p>
-
-          <div className="env-row">
-            <label>
-              Source Environment
-              <button
-                type="button"
-                className={`env-select-btn env-status-${fromEnvStatus}`}
-                onClick={() => openEnvModal('from')}
-              >
-                {fromEnvStatus === 'success' && <CheckCircleOutlineIcon fontSize="small" />}
-                {fromEnvStatus === 'error' && <ErrorOutlineIcon fontSize="small" />}
-                <span>{fromEnv || 'Select environment'}</span>
-              </button>
-            </label>
-            <span className="env-arrow">→</span>
-            <label>
-              Destination Environment
-              <button
-                type="button"
-                className={`env-select-btn env-status-${toEnvStatus}`}
-                onClick={() => openEnvModal('to')}
-              >
-                {toEnvStatus === 'success' && <CheckCircleOutlineIcon fontSize="small" />}
-                {toEnvStatus === 'error' && <ErrorOutlineIcon fontSize="small" />}
-                <span>{toEnv || 'Select environment'}</span>
-              </button>
-            </label>
-          </div>
-          {sameEnv && <div className="error">Source and destination environments must be different.</div>}
-
-          <Dialog open={envModalOpen} onClose={() => setEnvModalOpen(false)} fullWidth maxWidth="sm">
-            <DialogTitle>Configure {modalTarget === 'from' ? 'source' : 'destination'} environment (IFS API)</DialogTitle>
-            <DialogContent>
-              <p className="login-sub" style={{ marginTop: -4 }}>
-                These settings define how the tool authorizes against the IFS Cloud REST API for this
-                environment before issuing GET requests to fetch entities.
-              </p>
-
-              {modalOtherEnv && modalLabel === modalOtherEnv && (
-                <div className="error" style={{ marginTop: 10 }}>
-                  {modalLabel} is already configured as the {modalOtherLabel} environment.
-                </div>
-              )}
-
-              <div className="env-form">
-                <label>
-                  Base URL
-                  <input
-                    type="text"
-                    placeholder="https://ifscloud.yourorganization.com"
-                    value={authForm.baseUrl}
-                    onChange={(e) => updateAuthField('baseUrl', e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  Authorization path
-                  <input
-                    type="text"
-                    placeholder="{Base URL}/auth/realms/{YourNamespace}/protocol/openid-connect/token"
-                    value={authForm.authPath}
-                    onChange={(e) => updateAuthField('authPath', e.target.value)}
-                  />
-                  <small className="field-hint">
-                    {'Filled in from the Base URL — replace {YourNamespace} with your own namespace, which you can find in Solution Manager > Setup > System Parameters > parameter "Namespace".'}
-                  </small>
-                </label>
-
-                <label>
-                  Grant type
-                  <select value={authForm.grantType} onChange={(e) => updateAuthField('grantType', e.target.value)}>
-                    {GRANT_TYPES.map((g) => (
-                      <option key={g.value} value={g.value}>{g.label}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <div className="env-form-pair">
-                  <label>
-                    Client ID
-                    <input
-                      type="text"
-                      placeholder="sebsa-migration-tool"
-                      value={authForm.clientId}
-                      onChange={(e) => updateAuthField('clientId', e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Client secret
-                    <input
-                      type="password"
-                      placeholder="••••••••"
-                      value={authForm.clientSecret}
-                      onChange={(e) => updateAuthField('clientSecret', e.target.value)}
-                    />
-                  </label>
-                </div>
-
-                {authForm.grantType === 'password' && (
-                  <div className="env-form-pair">
-                    <label>
-                      Username
-                      <input
-                        type="text"
-                        value={authForm.username}
-                        onChange={(e) => updateAuthField('username', e.target.value)}
-                      />
-                    </label>
-                    <label>
-                      Password
-                      <input
-                        type="password"
-                        value={authForm.password}
-                        onChange={(e) => updateAuthField('password', e.target.value)}
-                      />
-                    </label>
-                  </div>
-                )}
-              </div>
-
-              {testStatus === 'success' && (
-                <div className="auth-banner success">
-                  <CheckCircleOutlineIcon fontSize="small" />
-                  <span>Authorized successfully. {testMessage}</span>
-                </div>
-              )}
-              {testStatus === 'error' && (
-                <div className="auth-banner error">
-                  <ErrorOutlineIcon fontSize="small" />
-                  <span>{testMessage}</span>
-                </div>
-              )}
-              {sessionTokenInfo && (
-                <p className="field-hint" style={{ marginTop: 10 }}>
-                  Session token cached for {modalEnv} — expires {new Date(sessionTokenInfo.expiresAt).toLocaleTimeString()}.
-                  It will be reused (no re-authorization) until then.
-                </p>
-              )}
-            </DialogContent>
-            <DialogActions>
-              <button type="button" className="ghost" onClick={() => setEnvModalOpen(false)}>Cancel</button>
-              <button type="button" className="secondary" onClick={handleTestConnection} disabled={testStatus === 'testing'}>
-                {testStatus === 'testing' ? 'Authorizing…' : 'Test connection'}
-              </button>
-              <button type="button" onClick={handleSaveEnvConfig}>
-                Save &amp; use environment
-              </button>
-            </DialogActions>
-          </Dialog>
-
-          <div className="actions">
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => router.push(`/new-migration/sales-part-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
-              disabled={!fromEnv}
-            >
-              <CloudDownloadOutlinedIcon fontSize="small" />
-              Get live data (SalesPartSet)
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => router.push(`/new-migration/part-catalog-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
-              disabled={!fromEnv}
-            >
-              <CloudDownloadOutlinedIcon fontSize="small" />
-              Get live data (PartCatalogSet)
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => router.push(`/new-migration/inventory-part-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
-              disabled={!fromEnv}
-            >
-              <CloudDownloadOutlinedIcon fontSize="small" />
-              Get live data (InventoryPartSet)
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => router.push(`/new-migration/purchase-part-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
-              disabled={!fromEnv}
-            >
-              <CloudDownloadOutlinedIcon fontSize="small" />
-              Get live data (PurchasePartSet)
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => router.push(`/new-migration/company-set?env=${encodeURIComponent(SOURCE_ENV)}`)}
-              disabled={!fromEnv}
-            >
-              <CloudDownloadOutlinedIcon fontSize="small" />
-              Get live data (CompanySet)
-            </button>
-            <button onClick={() => setStep(1)} disabled={!canProceedConfig}>
-              Next
+          <h2>Environments not configured</h2>
+          <p className="login-sub" style={{ marginTop: -6 }}>
+            Set up the source and destination IFS environments (two different ones) before starting a transfer.
+          </p>
+          <div className="actions" style={{ justifyContent: 'flex-start' }}>
+            <button onClick={() => router.push('/configuration')}>
+              <TuneOutlinedIcon fontSize="small" />
+              Go to Configuration
             </button>
           </div>
         </div>
       )}
 
-      {step === 1 && renderSelectEntitiesStep()}
+      {envReady && (
+        <>
+          <MigrationStepper steps={STEPS} activeStep={step} />
 
-      {step === 2 && renderReviewDataStep()}
+          {step === 0 && renderSelectEntitiesStep()}
 
-      {step === 3 && renderTransferStep()}
+          {step === 1 && renderReviewDataStep()}
+
+          {step === 2 && renderTransferStep()}
+        </>
+      )}
     </>
   )
 }

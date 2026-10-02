@@ -55,16 +55,15 @@ const StepIconRoot = styled('div')(({ ownerState }) => ({
   })
 }))
 
+// Keyed by step label, so the icons don't shift when the step list changes.
 const STEP_ICONS = {
-  1: SettingsOutlinedIcon,
-  2: TaskAltOutlinedIcon,
-  3: FactCheckOutlinedIcon,
-  4: CloudUploadOutlinedIcon
+  'Select Entities': TaskAltOutlinedIcon,
+  'Review Data': FactCheckOutlinedIcon,
+  Transfer: CloudUploadOutlinedIcon
 }
 
-function MigrationStepIcon(props) {
-  const { active, completed, icon } = props
-  const Icon = STEP_ICONS[icon]
+function MigrationStepIcon({ active, completed, label }) {
+  const Icon = STEP_ICONS[label] || SettingsOutlinedIcon
 
   return (
     <StepIconRoot ownerState={{ active, completed }}>
@@ -76,6 +75,7 @@ function MigrationStepIcon(props) {
 export default function MigrationStepper({ steps, activeStep }) {
   return (
     <Stepper
+      className="migration-stepper"
       alternativeLabel
       activeStep={activeStep}
       connector={<StepConnectorStyled />}
@@ -85,6 +85,7 @@ export default function MigrationStepper({ steps, activeStep }) {
         <Step key={label}>
           <StepLabel
             slots={{ stepIcon: MigrationStepIcon }}
+            slotProps={{ stepIcon: { label } }}
             sx={{
               '& .MuiStepLabel-label': {
                 fontWeight: 700,

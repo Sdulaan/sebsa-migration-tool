@@ -124,7 +124,7 @@ export default function SiteMigrationDialog({ open, onClose, sites }) {
   const siteWord = sites.length === 1 ? 'site' : 'sites'
 
   return (
-    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="md">
+    <Dialog className="app-dialog" open={open} onClose={handleClose} fullWidth maxWidth="md">
       <DialogTitle>
         {phase === 'confirm' && `Migrate ${sites.length} ${siteWord} to the destination?`}
         {phase === 'running' && `Migrating site ${viewIndex + 1} of ${sites.length}…`}

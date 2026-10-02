@@ -70,6 +70,25 @@ export function saveEnvironmentConfig(env, config) {
   return next
 }
 
+// Display label for an environment: its configured Base URL host.
+export function environmentLabel(baseUrl, fallback = '') {
+  try {
+    return new URL(baseUrl).host
+  } catch {
+    return baseUrl?.trim() || fallback
+  }
+}
+
+// The saved Source → Destination pair, as labels. `ready` is true when both
+// have a Base URL and they aren't the same environment — what the New
+// Transfer wizard needs before it can start.
+export function getTransferEnvironments() {
+  const fromEnv = environmentLabel(getEnvironmentConfig(SOURCE_ENV).baseUrl)
+  const toEnv = environmentLabel(getEnvironmentConfig(DEST_ENV).baseUrl)
+  const sameEnv = Boolean(fromEnv && toEnv && fromEnv === toEnv)
+  return { fromEnv, toEnv, sameEnv, ready: Boolean(fromEnv && toEnv && !sameEnv) }
+}
+
 // Access tokens live only in sessionStorage (cleared when the tab/session
 // ends) — separate from the connection config in localStorage, and never
 // persisted across browser restarts.

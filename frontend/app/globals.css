@@ -35,13 +35,16 @@ button:focus-visible,.button:focus-visible,a:focus-visible,input:focus-visible{o
 .link-btn{padding:6px 0!important;background:none!important;font-size:12px;font-weight:700}
 
 .shell{min-height:100vh;display:grid;grid-template-columns:255px minmax(0,1fr)}
-aside{background:var(--surface);color:var(--text);padding:28px 20px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;border-right:1px solid var(--border)}
+.app-main-column{min-width:0}
+.app-mobile-toolbar,.app-sidebar-backdrop,.app-menu-toggle{display:none}
+.app-sidebar{background:var(--surface);color:var(--text);padding:28px 20px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;border-right:1px solid var(--border)}
+.app-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .brand{display:flex;gap:12px;align-items:center;font-weight:800}
 .brand-logo{height:30px;width:auto}
-nav{display:grid;gap:5px;margin-top:38px}
-nav a{display:flex;align-items:center;gap:10px;width:100%;color:#4B5265;text-decoration:none;padding:11px 12px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer}
-nav a svg{flex:0 0 auto}
-nav a.active,nav a:hover{background:var(--accent-soft);color:var(--accent-strong)}
+.app-nav{display:grid;gap:5px;margin-top:38px}
+.app-nav a{display:flex;align-items:center;gap:10px;width:100%;color:#4B5265;text-decoration:none;padding:11px 12px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer}
+.app-nav a svg{flex:0 0 auto}
+.app-nav a.active,.app-nav a:hover{background:var(--accent-soft);color:var(--accent-strong)}
 .sebsa-mark{background:linear-gradient(135deg,var(--grad-start),var(--grad-end));-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:800;font-size:11px;letter-spacing:.08em;display:block;margin-bottom:8px}
 .notice{margin-top:auto;font-size:12px;line-height:1.6;color:var(--text-faint);border-top:1px solid var(--border-soft);padding-top:18px}
 .session-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft);color:var(--text-muted)}
@@ -351,13 +354,20 @@ td{vertical-align:top;padding:12px 10px;border-bottom:1px solid var(--border-sof
 .login-hint{margin-top:20px;font-size:12px;color:var(--text-faint)}
 
 @media(max-width:900px){
-  .shell{grid-template-columns:1fr}
-  aside{height:auto;position:static}
+  .shell{grid-template-columns:0 minmax(0,1fr);transition:grid-template-columns .2s ease}
+  .shell.sidebar-open{grid-template-columns:255px minmax(0,1fr)}
+  .app-sidebar{width:0;min-width:0;padding:0;overflow:hidden;visibility:hidden;pointer-events:none}
+  .sidebar-open .app-sidebar{width:auto;height:100dvh;padding:28px 20px;overflow-y:auto;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;visibility:visible;pointer-events:auto}
+  .sidebar-open .app-sidebar-head{min-height:44px;justify-content:center}
+  .app-menu-toggle{display:inline-flex;align-items:center;justify-content:center;position:fixed;top:14px;left:16px;z-index:40;width:44px;height:44px;padding:0;box-shadow:none;background:var(--accent-soft);color:var(--accent-strong);transition:left .2s ease}
+  .sidebar-open .app-menu-toggle{left:195px}
+  .app-mobile-toolbar{display:flex;align-items:center;justify-content:center;min-height:72px;padding:12px 16px;position:sticky;top:0;z-index:10;background:var(--surface);border-bottom:1px solid var(--border)}
+  .sidebar-open .app-mobile-toolbar{display:none}
   .notice-text{display:none}
   .notice{border-top:none;padding-top:0}
   .session-row{border-top:none;margin-top:14px}
-  nav{display:flex;overflow-x:auto;margin-top:20px;gap:5px}
-  nav a{width:auto;white-space:nowrap;flex:0 0 auto}
+  .app-nav{margin-top:38px}
+  .app-nav a{min-height:44px}
   main{padding:22px}
   header{flex-direction:column}
   h1{font-size:26px}
@@ -476,21 +486,118 @@ main:has(.review-screen) > *:not(.review-screen){flex:0 0 auto}
 .review-screen-body .erp-records-scroll{max-height:none}
 .review-screen-body .erp-detail{height:100%;max-height:none;overflow-y:auto}
 .review-screen-footer{flex:0 0 auto;margin:0}
+/* Entity bar (GET URL, record count, Refresh) above the three columns */
+.review-entity{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:10px}
+.review-screen-body .review-entity .erp-layout{height:auto}
+.review-entity-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface)}
+.review-entity-bar-info{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;min-width:0}
+.review-entity-bar-info small{flex-basis:100%;color:var(--text-muted);font-size:12px;word-break:break-all}
+.review-entity-bar .secondary{padding:7px 12px;font-size:13px;flex:0 0 auto}
+
+.profile-panel{padding:32px}
 
 @media(max-width:900px){
-  .erp-layout{grid-template-columns:1fr}
-  .erp-categories{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--border)}
-  .erp-cat-item{width:auto}
+  .erp-layout{grid-template-columns:minmax(220px,32%) minmax(0,1fr);min-height:0}
+  .erp-categories{grid-column:1/-1;flex-direction:row;flex-wrap:nowrap;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border);height:auto!important}
+  .erp-cat-item{width:auto;flex:0 0 auto;min-height:44px}
   .erp-cat-label{flex:none}
-  .erp-records{border-right:0;border-bottom:1px solid var(--border)}
-  .erp-records-scroll,.erp-detail{max-height:none}
+  .erp-records{border-bottom:0;min-height:0}
+  .erp-records-scroll{max-height:620px}
+  .erp-detail{max-height:680px}
   .erp-detail-header{position:static}
   /* Revert to normal document flow so small screens scroll the page */
   main:has(.review-screen){height:auto;overflow:visible;display:block}
   .review-screen{display:block}
   .review-screen-body{display:block}
+  .review-entity{display:block}
+  .review-entity-bar{margin-bottom:10px}
   .review-screen-body .erp-layout,
-  .review-screen-body .erp-categories,
   .review-screen-body .erp-records,
   .review-screen-body .erp-detail{height:auto}
+  .review-screen-body .erp-records-scroll{max-height:620px}
+  .review-screen-body .erp-detail{max-height:680px}
+}
+
+@media(min-width:601px) and (max-width:900px){
+  .sidebar-open .live-data-layout,.sidebar-open .site-layout,.sidebar-open .config-layout,.sidebar-open .erp-layout{grid-template-columns:minmax(0,1fr)}
+  .sidebar-open .live-data-list{max-height:220px;min-height:0;border-right:0;border-bottom:1px solid var(--border)}
+  .sidebar-open .site-list{max-height:260px;min-height:0}
+  .sidebar-open .config-sidebar{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border)}
+  .sidebar-open .config-nav-item{width:auto;white-space:nowrap}
+  .sidebar-open .erp-categories{grid-column:1}
+  .sidebar-open .erp-records{border-right:0;border-bottom:1px solid var(--border)}
+  .sidebar-open .erp-records-scroll,.sidebar-open .review-screen-body .erp-records-scroll{max-height:300px}
+  .sidebar-open .erp-detail,.sidebar-open .review-screen-body .erp-detail{max-height:none;overflow:visible}
+}
+
+@media(max-width:600px){
+  body:has(.shell.sidebar-open){overflow:hidden}
+  .shell,.shell.sidebar-open{grid-template-columns:minmax(0,1fr)}
+  .app-menu-toggle{top:14px;left:16px}
+  .sidebar-open .app-menu-toggle{left:calc(min(280px, 85vw) - 60px)}
+  .app-sidebar,.sidebar-open .app-sidebar{position:fixed;inset:0 auto 0 0;z-index:30;width:min(280px,85vw);height:100dvh;transform:translateX(-100%);transition:transform .2s ease;padding:20px 16px;overflow-y:auto;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;box-shadow:var(--shadow)}
+  .sidebar-open .app-sidebar{transform:translateX(0)}
+  .sidebar-open .app-sidebar-backdrop{display:block;position:fixed;inset:0;z-index:20;width:100%;height:100%;padding:0;border-radius:0;background:rgba(30,36,51,.45);box-shadow:none}
+  .shell main{padding:16px;overflow-x:clip}
+  .shell main > *, .panel, .site-detail, .config-content, .review-screen, .review-screen-body{min-width:0}
+  .profile-panel{padding:18px}
+  .profile-panel > div, .profile-panel > div > div{min-width:0}
+  .profile-panel > div > div > div{min-width:0;overflow-wrap:anywhere}
+  .section-heading,.config-content-header,.site-data-head,.review-entity-bar{flex-wrap:wrap}
+  .actions{flex-wrap:wrap}
+  .actions > button,.actions > .button{max-width:100%;justify-content:center;white-space:normal;text-align:center}
+  .auth-banner{align-items:flex-start;overflow-wrap:anywhere}
+  .env-form-pair,.site-group-grid,.live-data-detail-grid,.erp-grid{grid-template-columns:minmax(0,1fr)}
+  .live-data-detail{padding:16px}
+  .live-data-list{min-height:0;max-height:240px}
+  .site-card,.site-tab-body{padding:16px}
+  .site-tabs-card,.config-panel{padding:0}
+  .site-tabs{scrollbar-width:thin}
+  .site-list-toolbar{flex-wrap:wrap}
+  .config-content{padding:16px}
+  .config-sidebar{padding:10px}
+  .column-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
+  .erp-layout{grid-template-columns:minmax(0,1fr)}
+  .erp-categories{grid-column:1;scrollbar-width:thin}
+  .erp-records{border-right:0;border-bottom:1px solid var(--border)}
+  .erp-records-scroll,.review-screen-body .erp-records-scroll{max-height:300px}
+  .erp-detail,.review-screen-body .erp-detail{max-height:none;overflow:visible}
+  .erp-detail-header{padding:16px}
+  .erp-form{padding:16px;gap:14px}
+  .erp-card{padding:16px}
+  .erp-empty{min-height:160px;padding:28px 16px}
+  .review-screen-footer{justify-content:stretch}
+  .review-screen-footer > button{flex:1 1 100%}
+  .migration-stepper{margin-bottom:18px!important}
+  .migration-stepper .MuiStepLabel-iconContainer > div{width:34px;height:34px}
+  .migration-stepper .MuiStepConnector-alternativeLabel{top:17px}
+  .migration-stepper .MuiStepLabel-label{font-size:10px!important;line-height:1.2}
+  .MuiDialogActions-root{flex-wrap:wrap}
+}
+
+@media(max-width:1200px), (max-height:800px){
+  .app-dialog .MuiDialog-container{box-sizing:border-box;min-height:100dvh;padding:24px;align-items:center;justify-content:center}
+  .app-dialog .MuiDialog-paper{box-sizing:border-box;display:flex;flex-direction:column;width:100%;min-width:0;height:auto;margin:0;max-height:min(900px, calc(100dvh - 48px));overflow:hidden}
+  .app-dialog .MuiDialogTitle-root{flex:0 0 auto;overflow-wrap:anywhere}
+  .app-dialog .MuiDialogContent-root{flex:1 1 auto;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;overflow-wrap:anywhere}
+  .app-dialog .MuiDialogActions-root{flex:0 0 auto;flex-wrap:wrap;gap:8px}
+  .app-dialog .MuiDialogActions-root > *{margin:0}
+  .app-dialog .env-form label,.app-dialog .env-form input,.app-dialog .env-form select{min-width:0}
+  .app-dialog .env-form input,.app-dialog .env-form select{width:100%}
+}
+
+@media(max-width:600px){
+  .app-dialog .MuiDialog-container{padding:0;align-items:stretch}
+  .app-dialog .MuiDialog-paper{width:100%;height:100dvh;max-width:none;max-height:100dvh;border-radius:0}
+  .app-dialog .MuiDialogTitle-root{padding: max(16px, env(safe-area-inset-top)) 16px 12px;font-size:18px;line-height:1.35}
+  .app-dialog .MuiDialogContent-root{padding:16px}
+  .app-dialog .MuiDialogActions-root{display:flex;flex-direction:column;align-items:stretch;padding:12px 16px max(12px, env(safe-area-inset-bottom));border-top:1px solid var(--border-soft)}
+  .app-dialog .MuiDialogActions-root > *{width:100%;min-width:0;justify-content:center;text-align:center;white-space:normal}
+  .app-dialog .MuiDialogActions-root > .MuiBox-root > button{width:100%;white-space:normal}
+  .app-dialog .mig-scopes{grid-template-columns:minmax(0,1fr)}
+  .app-dialog .mig-step-head{flex-wrap:wrap;gap:6px 8px;padding:10px}
+  .app-dialog .mig-step-label{flex:1 1 calc(100% - 80px);overflow-wrap:anywhere}
+  .app-dialog .mig-step-status{flex:1 1 100%;padding-left:36px;white-space:normal}
+  .app-dialog .mig-step-detail{padding:6px 12px 12px}
+  .app-dialog .mig-record-label,.app-dialog .mig-record-error{overflow-wrap:anywhere}
 }

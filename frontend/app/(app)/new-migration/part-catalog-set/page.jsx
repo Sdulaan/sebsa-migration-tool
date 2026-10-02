@@ -256,7 +256,7 @@ function PartCatalogSetContent() {
         )}
       </div>
 
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="sm">
+      <Dialog className="app-dialog" open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>Transfer to destination environment?</DialogTitle>
         <DialogContent>
           <p className="login-sub" style={{ marginTop: -4, wordBreak: 'break-all' }}>
