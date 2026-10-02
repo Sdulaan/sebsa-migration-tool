@@ -893,6 +893,10 @@ async function callIfsRoute(path, env, config, payload) {
 // GETs every record of a registry entity (lib/entityRegistry.js) from the
 // given environment.
 export async function fetchEntityRecords(entityId, env, config) {
+  if (entityId === 'supplier') {
+    const body = await fetchSupplierStage(env, config, 'supplier_general_information', {})
+    return body.success ? { success: true, url: body.url, records: body.records || [] } : body
+  }
   const body = await callIfsRoute('/api/ifs/entity', env, config, { entity: entityId })
   return body.success ? { success: true, url: body.url, records: body.records || [] } : body
 }
@@ -903,6 +907,16 @@ export async function fetchEntityRecords(entityId, env, config) {
 // identifiable answer for that record.
 export async function postEntityBatch(entityId, env, config, records) {
   return callIfsRoute('/api/ifs/batch', env, config, { entity: entityId, records })
+}
+
+// Supplier child collections use nested SupplierHandling URLs and their own
+// POST field lists; the Supplier route builds those URLs and validates bodies.
+export async function fetchSupplierStage(env, config, stage, keys) {
+  return callIfsRoute('/api/ifs/supplier', env, config, { operation: 'list', stage, keys })
+}
+
+export async function postSupplierStage(env, config, stage, records) {
+  return callIfsRoute('/api/ifs/supplier', env, config, { operation: 'create', stage, records })
 }
 
 // IFS OData responses carry internal/technical bookkeeping fields alongside

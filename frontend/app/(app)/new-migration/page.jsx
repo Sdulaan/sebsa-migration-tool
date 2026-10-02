@@ -35,6 +35,8 @@ import { reviewSubTabList, buildReviewSubTabs } from '../../../lib/reviewDetailM
 import { fetchCompanyReviewSubTabs, COMPANY_REVIEW_TABS } from '../../../lib/companyReviewData'
 import { fetchSiteReviewSubTabs, SITE_REVIEW_TABS } from '../../../lib/siteReviewData'
 import { allowListReview } from '../../../lib/partReviewData'
+import { fetchSupplierTree, supplierTreeTabs } from '../../../lib/supplierTransfer'
+import { SUPPLIER_STAGES } from '../../../lib/supplierApi'
 
 // The part entities' Review Data shows the registry's own POST allow-list, so
 // "Transferred to IFS" is exactly what the Transfer step sends.
@@ -53,7 +55,18 @@ const LIVE_REVIEW_ENTITIES = {
   masterPart: partReview('masterPart'),
   inventoryPart: partReview('inventoryPart'),
   purchasePart: partReview('purchasePart'),
-  salesPart: partReview('salesPart')
+  salesPart: partReview('salesPart'),
+  supplier: {
+    tabs: SUPPLIER_STAGES.map(({ id, label }) => ({ tabId: id, tabName: label })),
+    fetchSubTabs: async (record) => {
+      try {
+        const tree = await fetchSupplierTree(record, getEnvironmentConfig(SOURCE_ENV))
+        return { success: true, subTabs: supplierTreeTabs(tree) }
+      } catch (err) {
+        return { success: false, error: err.message || 'Could not load Supplier details.' }
+      }
+    }
+  }
 }
 import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../lib/transactionLog'
 import { runTransfer } from '../../../lib/transferRunner'
