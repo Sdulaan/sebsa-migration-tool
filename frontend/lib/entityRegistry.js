@@ -100,7 +100,7 @@ const DEFINITIONS = [
     keyFields: ['PartNo'],
     titleField: 'Description',
     references: [],
-    dependsOn: ['company', 'site'],
+    dependsOn: [],
     fields: PART_CATALOG_MIGRATION_FIELDS,
     fixedValues: PART_CATALOG_FIXED_VALUES,
     verified: 'post'

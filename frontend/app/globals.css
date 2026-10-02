@@ -40,7 +40,7 @@ button:focus-visible,.button:focus-visible,a:focus-visible,input:focus-visible{o
 .app-sidebar{background:var(--surface);color:var(--text);padding:28px 20px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;border-right:1px solid var(--border)}
 .app-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .brand{display:flex;gap:12px;align-items:center;font-weight:800}
-.brand-logo{height:30px;width:auto}
+.brand-logo{height:70px;width:auto}
 .app-nav{display:grid;gap:5px;margin-top:38px}
 .app-nav a{display:flex;align-items:center;gap:10px;width:100%;color:#4B5265;text-decoration:none;padding:11px 12px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer}
 .app-nav a svg{flex:0 0 auto}
@@ -403,6 +403,9 @@ td{vertical-align:top;padding:12px 10px;border-bottom:1px solid var(--border-sof
 .tx-count.tx-FAILED{color:var(--danger-text);font-weight:800}
 .tx-count.tx-SKIPPED{color:var(--text-muted);font-weight:800}
 .tx-count.tx-UNCONFIRMED{color:var(--warning-text);font-weight:800}
+.tx-group-row:hover{background:var(--accent-soft)}
+.tx-group-row td:first-child{font-weight:800}
+.tx-group-chevron{transition:transform .15s ease}
 
 /* ── ERP 3-column accordion master-detail (Review step) ── */
 .erp-layout{display:grid;grid-template-columns:200px 300px 1fr;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface);box-shadow:var(--shadow);min-height:calc(100vh - 320px)}
@@ -601,3 +604,21 @@ main:has(.review-screen) > *:not(.review-screen){flex:0 0 auto}
   .app-dialog .mig-step-detail{padding:6px 12px 12px}
   .app-dialog .mig-record-label,.app-dialog .mig-record-error{overflow-wrap:anywhere}
 }
+
+/* Loading Orbit — centered animation for long-running operations (see
+   components/LoadingOrbit.jsx). */
+.loading-orbit{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius-lg);box-shadow:var(--shadow);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:72px 24px;gap:20px}
+.loading-orbit-rings{position:relative;width:96px;height:96px;display:flex;align-items:center;justify-content:center}
+.loading-orbit-ring{position:absolute;border-radius:50%}
+.loading-orbit-ring-outer{inset:0;border:1px solid var(--accent-soft-border);animation:orbit-ping 2s cubic-bezier(0,0,.2,1) infinite}
+.loading-orbit-ring-mid{inset:8px;border:2px solid transparent;border-top-color:var(--grad-start);border-right-color:var(--grad-mid);animation:orbit-spin 1s linear infinite}
+.loading-orbit-ring-inner{inset:16px;border:1px dashed var(--accent-soft-border);animation:orbit-spin 3s linear infinite reverse}
+.loading-orbit-tile{position:relative;width:48px;height:48px;display:flex;align-items:center;justify-content:center;animation:orbit-pulse 2s cubic-bezier(.4,0,.6,1) infinite}
+.loading-orbit-tile img{object-fit:contain}
+.loading-orbit-text{text-align:center}
+.loading-orbit-title{margin:0 0 4px;font-size:14px;font-weight:800;color:var(--text)}
+.loading-orbit-subtitle{margin:0;font-size:12px;color:var(--text-muted);max-width:320px;line-height:1.5}
+.loading-orbit-subtitle strong{color:var(--text)}
+@keyframes orbit-ping{0%{transform:scale(1);opacity:.4}75%,100%{transform:scale(1.9);opacity:0}}
+@keyframes orbit-spin{to{transform:rotate(360deg)}}
+@keyframes orbit-pulse{0%,100%{opacity:1}50%{opacity:.6}}

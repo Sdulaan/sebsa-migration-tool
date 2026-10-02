@@ -6,18 +6,9 @@ import Dialog from '@mui/material/Dialog'
 import DialogTitle from '@mui/material/DialogTitle'
 import DialogContent from '@mui/material/DialogContent'
 import DialogActions from '@mui/material/DialogActions'
-import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined'
-import ApartmentOutlinedIcon from '@mui/icons-material/ApartmentOutlined'
-import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined'
-import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined'
-import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined'
-import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
-import SellOutlinedIcon from '@mui/icons-material/SellOutlined'
-import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined'
-import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined'
 import ViewSidebarOutlinedIcon from '@mui/icons-material/ViewSidebarOutlined'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined'
@@ -60,23 +51,13 @@ import { TX_STATUS_LABELS, createTransactionLog, summarizeLog } from '../../../l
 import { runTransfer } from '../../../lib/transferRunner'
 import { downloadTransactionLog } from '../../../lib/transactionLogExcel'
 import MigrationStepper from '../../../components/MigrationStepper'
+import LoadingOrbit from '../../../components/LoadingOrbit'
 
 // Environments are set on the Configuration page (/configuration), not here.
 const STEPS = ['Select Entities', 'Review Data', 'Transfer']
 
-const ENTITY_ICONS = {
-  company: ApartmentOutlinedIcon,
-  site: RoomOutlinedIcon,
-  customer: PersonOutlineOutlinedIcon,
-  masterPart: Inventory2OutlinedIcon,
-  inventoryPart: CategoryOutlinedIcon,
-  purchasePart: ShoppingCartOutlinedIcon,
-  salesPart: SellOutlinedIcon,
-  supplier: LocalShippingOutlinedIcon,
-  inventoryLocations: WarehouseOutlinedIcon
-}
-
 const STATUS_COLUMNS = ['SUCCESS', 'ALREADY_EXISTS', 'FAILED', 'SKIPPED', 'UNCONFIRMED']
+const COMPANY_LOG_IDS = new Set(COMPANY_MIGRATION_LOG_ENTITIES.map((e) => e.id))
 
 // Review-list title for a fetched record: its title field, else its key.
 function recordTitle(entity, record) {
@@ -283,11 +264,13 @@ function ReviewAccordion({ entity, records, selectedIds, allSelected, onToggleRe
                       <strong>{recordTitle(entity, record)}</strong>
                       <small>{entity.keyFields.map((key) => `${key}: ${record[key] ?? '—'}`).join(' · ')}</small>
                     </span>
-                    <ExpandMoreIcon className={`erp-record-chevron ${isExpanded ? 'open' : ''}`} fontSize="small" />
+                    {subTabList.length > 1 && (
+                      <ExpandMoreIcon className={`erp-record-chevron ${isExpanded ? 'open' : ''}`} fontSize="small" />
+                    )}
                   </button>
                 </div>
 
-                {isExpanded && (
+                {isExpanded && subTabList.length > 1 && (
                   <div className="erp-subtabs">
                     {subTabList.map((tab) => {
                       const isActive = selectedRecordId === index && selectedSubTabId === tab.tabId
@@ -390,6 +373,10 @@ export default function NewMigrationPage() {
   const [confirmTransferOpen, setConfirmTransferOpen] = useState(false)
   const cancelRequested = useRef(false)
   const [transferredEntityIds, setTransferredEntityIds] = useState(new Set())
+  // Which grouped rows (e.g. "Company", bundling its header + sub-entity
+  // steps) are expanded in the final transfer summary table — closed by
+  // default, see renderStatusCounts.
+  const [expandedSummaryGroups, setExpandedSummaryGroups] = useState(new Set())
 
   // Scoped to the current from→to pair: an entity already sitting in a
   // different destination doesn't mean it exists in *this* one.
@@ -639,7 +626,6 @@ export default function NewMigrationPage() {
           <aside className="erp-categories">
             {fetchedIds.map((id) => {
               const entity = AVAILABLE_ENTITIES.find((e) => e.id === id)
-              const Icon = ENTITY_ICONS[id]
               return (
                 <button
                   type="button"
@@ -647,7 +633,6 @@ export default function NewMigrationPage() {
                   className={`erp-cat-item ${displayEntityId === id ? 'active' : ''}`}
                   onClick={() => setActiveEntityId(id)}
                 >
-                  {Icon && <Icon className="erp-cat-icon" fontSize="small" />}
                   <span className="erp-cat-label">{entity.label}</span>
                   <span className="erp-cat-count">{dataMap[id].total}</span>
                 </button>
@@ -713,12 +698,33 @@ export default function NewMigrationPage() {
     )
   }
 
+  // "A", "A and B", "A, B and C"
+  function formatList(items) {
+    if (items.length <= 1) return items.join('')
+    if (items.length === 2) return `${items[0]} and ${items[1]}`
+    return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+  }
+
   function renderSelectEntitiesStep() {
     const dependencyIssues = AVAILABLE_ENTITIES
       .filter((ent) => selectedEntities.includes(ent.id))
       .map((ent) => ({ ent, missing: getUnmetDependencies(ent, selectedEntities) }))
       .filter((issue) => issue.missing.length > 0)
     const canProceed = selectedEntities.length > 0 && dependencyIssues.length === 0 && !loading
+
+    // Group entities that are missing the exact same dependency set so the
+    // message reads "Customer, Master Part and Inventory Part need Site to
+    // be selected." instead of one near-identical line per entity.
+    const groupedDependencyIssues = []
+    dependencyIssues.forEach(({ ent, missing }) => {
+      const key = missing.join('|')
+      let group = groupedDependencyIssues.find((g) => g.key === key)
+      if (!group) {
+        group = { key, missing, entities: [] }
+        groupedDependencyIssues.push(group)
+      }
+      group.entities.push(ent.label)
+    })
 
     return (
       <>
@@ -738,11 +744,12 @@ export default function NewMigrationPage() {
                 {BASIC_ENTITIES.map(renderEntityCard)}
               </div>
 
-              {dependencyIssues.length > 0 && (
+              {groupedDependencyIssues.length > 0 && (
                 <div className="error" style={{ marginTop: 14 }}>
-                  {dependencyIssues.map(({ ent, missing }) => (
-                    <div key={ent.id}>
-                      {ent.label} requires {missing.map((id) => AVAILABLE_ENTITIES.find((e) => e.id === id).label).join(', ')} to be selected.
+                  {groupedDependencyIssues.map((g) => (
+                    <div key={g.key}>
+                      {formatList(g.entities)} {g.entities.length === 1 ? 'needs' : 'need'}{' '}
+                      {formatList(g.missing.map((id) => AVAILABLE_ENTITIES.find((e) => e.id === id).label))} to be selected.
                     </div>
                   ))}
                 </div>
@@ -838,7 +845,44 @@ export default function NewMigrationPage() {
     )
   }
 
+  function toggleSummaryGroup(key) {
+    setExpandedSummaryGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   function renderStatusCounts(summary) {
+    // Company logs under its header + every sub-entity step as separate
+    // "entities" (see handleTransfer) so the Excel export gets one sheet
+    // each — here they're rolled back up under one collapsible "Company"
+    // row instead of 22 near-empty-looking rows.
+    const companyRows = summary.entities.filter((e) => COMPANY_LOG_IDS.has(e.id))
+    const otherRows = summary.entities.filter((e) => !COMPANY_LOG_IDS.has(e.id))
+    const companyGroup = companyRows.length > 0
+      ? companyRows.reduce(
+          (acc, e) => {
+            acc.total += e.total
+            STATUS_COLUMNS.forEach((s) => { acc[s] += e[s] })
+            return acc
+          },
+          { total: 0, SUCCESS: 0, ALREADY_EXISTS: 0, FAILED: 0, SKIPPED: 0, UNCONFIRMED: 0 }
+        )
+      : null
+    const companyExpanded = expandedSummaryGroups.has('company')
+
+    const row = (e, { key, indent } = {}) => (
+      <tr key={key ?? e.id}>
+        <td style={indent ? { paddingLeft: 30 } : undefined}>{e.label}</td>
+        <td>{e.total}</td>
+        {STATUS_COLUMNS.map((s) => (
+          <td key={s} className={e[s] > 0 ? `tx-count tx-${s}` : 'tx-count'}>{e[s]}</td>
+        ))}
+      </tr>
+    )
+
     return (
       <div className="table-wrap" style={{ marginTop: 14 }}>
         <table className="tx-table">
@@ -850,15 +894,26 @@ export default function NewMigrationPage() {
             </tr>
           </thead>
           <tbody>
-            {summary.entities.map((e) => (
-              <tr key={e.id}>
-                <td>{e.label}</td>
-                <td>{e.total}</td>
-                {STATUS_COLUMNS.map((s) => (
-                  <td key={s} className={e[s] > 0 ? `tx-count tx-${s}` : 'tx-count'}>{e[s]}</td>
-                ))}
-              </tr>
-            ))}
+            {otherRows.map((e) => row(e))}
+            {companyGroup && (
+              <>
+                <tr className="tx-group-row" onClick={() => toggleSummaryGroup('company')} style={{ cursor: 'pointer' }}>
+                  <td>
+                    <ExpandMoreIcon
+                      fontSize="small"
+                      className="tx-group-chevron"
+                      style={{ transform: companyExpanded ? 'rotate(180deg)' : 'none', verticalAlign: 'middle', marginRight: 4 }}
+                    />
+                    Company
+                  </td>
+                  <td>{companyGroup.total}</td>
+                  {STATUS_COLUMNS.map((s) => (
+                    <td key={s} className={companyGroup[s] > 0 ? `tx-count tx-${s}` : 'tx-count'}>{companyGroup[s]}</td>
+                  ))}
+                </tr>
+                {companyExpanded && companyRows.map((e) => row(e, { key: e.id, indent: true }))}
+              </>
+            )}
           </tbody>
         </table>
       </div>
@@ -870,11 +925,12 @@ export default function NewMigrationPage() {
       const entity = AVAILABLE_ENTITIES.find((e) => e.id === transferProgress.entityId)
       return (
         <div className="panel">
-          <h2>Transferring…</h2>
-          <p className="login-sub" style={{ marginTop: -6 }}>
-            {entity ? `${entity.label}: ${transferProgress.sent} of ${transferProgress.toSend} sent` : 'Starting…'}
-          </p>
-          {renderStatusCounts(transferProgress.summary)}
+          <LoadingOrbit
+            title="Migrating Data…"
+            subtitle={entity ? <><strong>{entity.label}</strong>: {transferProgress.sent} of {transferProgress.toSend} sent</> : 'Starting…'}
+          >
+            <img src="/seb-logo-2.png" alt="" width={28} height={28} style={{ objectFit: 'contain' }} />
+          </LoadingOrbit>
           <div className="actions">
             <button type="button" className="ghost" onClick={() => { cancelRequested.current = true }}>
               Cancel after current batch
