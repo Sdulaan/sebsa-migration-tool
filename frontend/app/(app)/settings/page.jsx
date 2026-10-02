@@ -21,7 +21,7 @@ export default function ProfileSettingsPage() {
         </div>
       </header>
 
-      <div className="panel" style={{ maxWidth: '720px', padding: '32px' }}>
+      <div className="panel profile-panel" style={{ maxWidth: '720px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '32px' }}>
           <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--accent-soft)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <PersonOutlineOutlinedIcon style={{ fontSize: '32px' }} />

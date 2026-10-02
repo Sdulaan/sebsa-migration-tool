@@ -75,6 +75,7 @@ function MigrationStepIcon({ active, completed, label }) {
 export default function MigrationStepper({ steps, activeStep }) {
   return (
     <Stepper
+      className="migration-stepper"
       alternativeLabel
       activeStep={activeStep}
       connector={<StepConnectorStyled />}

@@ -766,7 +766,7 @@ export default function NewMigrationPage() {
           </div>
         </div>
 
-        <Dialog open={confirmTransferOpen} onClose={() => setConfirmTransferOpen(false)} fullWidth maxWidth="sm">
+        <Dialog className="app-dialog" open={confirmTransferOpen} onClose={() => setConfirmTransferOpen(false)} fullWidth maxWidth="sm">
           <DialogTitle>Create records in the destination environment?</DialogTitle>
           <DialogContent>
             <p className="login-sub" style={{ marginTop: -4 }}>
