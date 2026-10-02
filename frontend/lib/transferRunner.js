@@ -24,7 +24,8 @@ import {
   isParentSatisfied,
   isAlreadyExistsError
 } from './transactionLog'
-import { postEntityBatch, postCompanyHeaderBatch } from './migrationStore'
+import { postEntityBatch, postCompanyHeaderBatch, postSupplierStage } from './migrationStore'
+import { transferSupplierChildren } from './supplierTransfer'
 
 // Company has a real, confirmed-working create flow (CreateNewCompany, header
 // fields only — see postCompanyHeaderBatch and its own duplicate check) that
@@ -32,7 +33,8 @@ import { postEntityBatch, postCompanyHeaderBatch } from './migrationStore'
 // registry entity uses. Its sub-entities (Address, Tax Control, ...), shown
 // in Review Data, aren't sent anywhere yet.
 const CUSTOM_POSTERS = {
-  company: postCompanyHeaderBatch
+  company: postCompanyHeaderBatch,
+  supplier: (env, config, records) => postSupplierStage(env, config, 'supplier_general_information', records.map((record) => ({ record, keys: {} })))
 }
 
 function posterFor(entity) {
@@ -137,6 +139,20 @@ export async function runTransfer({
             order
           })
         })
+        if (entity.id === 'supplier') {
+          for (const [index, item] of chunk.entries()) {
+            const status = res.results?.[index] ? classify(res.results[index]) : TX_STATUS.UNCONFIRMED
+            if (status !== TX_STATUS.SUCCESS && status !== TX_STATUS.ALREADY_EXISTS) continue
+            try {
+              await transferSupplierChildren({
+                supplier: records[item.order], destEnv, destConfig, log, shouldCancel, chunkSize,
+                onProgress: ({ stageLabel }) => onProgress({ entityId: entity.id, sent: sent + index + 1, toSend: toSend.length, stageLabel })
+              })
+            } catch (err) {
+              addLogEntry(log, { entity, key: `${item.key} / child records`, status: TX_STATUS.FAILED, message: `Supplier child transfer failed: ${err.message}`, indexed: false })
+            }
+          }
+        }
       }
 
       sent += chunk.length

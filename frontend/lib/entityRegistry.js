@@ -33,6 +33,7 @@ import {
   PART_CATALOG_FIXED_VALUES,
   pickPayloadFields
 } from './migrationFields'
+import { SUPPLIER_GENERAL_FIELDS } from './supplierApi'
 
 export const ENTITY_GROUPS = [
   { id: 'mandatory', label: 'Transfer Mandatory Data' },
@@ -162,11 +163,12 @@ const DEFINITIONS = [
     description: 'Supplier master records',
     group: 'basic',
     projection: 'SupplierHandling.svc',
-    entitySet: 'SupplierInfoSet',
+    entitySet: 'SupplierInfoGeneralSet',
     keyFields: ['SupplierId'],
     titleField: 'Name',
     references: [],
     dependsOn: ['company', 'site'],
+    fields: SUPPLIER_GENERAL_FIELDS,
     verified: null
   },
   {
