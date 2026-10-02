@@ -189,7 +189,7 @@ export default function ConfigurationPage() {
         </div>
         {sameEnv && <div className="error">Source and destination environments must be different.</div>}
 
-        <Dialog open={envModalOpen} onClose={() => setEnvModalOpen(false)} fullWidth maxWidth="sm">
+        <Dialog className="app-dialog" open={envModalOpen} onClose={() => setEnvModalOpen(false)} fullWidth maxWidth="sm">
           <DialogTitle>Configure {modalTarget === 'from' ? 'source' : 'destination'} environment (IFS API)</DialogTitle>
           <DialogContent>
             <p className="login-sub" style={{ marginTop: -4 }}>

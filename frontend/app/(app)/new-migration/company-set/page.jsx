@@ -333,7 +333,7 @@ function CompanySetContent() {
         )}
       </div>
 
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="sm">
+      <Dialog className="app-dialog" open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>Migrate to destination environment?</DialogTitle>
         <DialogContent>
           {pendingTransfer?.destCheckError && (

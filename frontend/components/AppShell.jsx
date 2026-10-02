@@ -9,15 +9,27 @@ import AddCircleOutlinedIcon from '@mui/icons-material/AddCircleOutlined'
 import HistoryIcon from '@mui/icons-material/History'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined'
+import MenuIcon from '@mui/icons-material/Menu'
+import CloseIcon from '@mui/icons-material/Close'
 
 export default function AppShell({ children }) {
   const pathname = usePathname()
   const router = useRouter()
   const [session, setSession] = useState(null)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
     setSession(getSession())
   }, [])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function closeOnEscape(event) {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [menuOpen])
 
   function handleLogout() {
     logout()
@@ -25,29 +37,31 @@ export default function AppShell({ children }) {
   }
 
   return (
-    <div className="shell">
-      <aside>
-        <div className="brand">
-          <img src="/sebsa-logo.png" alt="SEBSA" className="brand-logo" />
+    <div className={`shell ${menuOpen ? 'sidebar-open' : ''}`}>
+      <aside className="app-sidebar" id="app-navigation" aria-label="Main navigation">
+        <div className="app-sidebar-head">
+          <div className="brand">
+            <img src="/sebsa-logo.png" alt="SEBSA" className="brand-logo" />
+          </div>
         </div>
-        <nav>
-          <Link href="/" className={pathname === '/' ? 'active' : ''}>
+        <nav className="app-nav" aria-label="Main navigation">
+          <Link href="/" onClick={() => setMenuOpen(false)} className={pathname === '/' ? 'active' : ''}>
             <DashboardOutlinedIcon fontSize="small" /> Dashboard
           </Link>
-          <Link href="/new-migration" className={pathname === '/new-migration' ? 'active' : ''}>
+          <Link href="/new-migration" onClick={() => setMenuOpen(false)} className={pathname === '/new-migration' ? 'active' : ''}>
             <AddCircleOutlinedIcon fontSize="small" /> New Transfer
           </Link>
-          <Link href="/configuration" className={pathname === '/configuration' ? 'active' : ''}>
+          <Link href="/configuration" onClick={() => setMenuOpen(false)} className={pathname === '/configuration' ? 'active' : ''}>
             <TuneOutlinedIcon fontSize="small" /> Configuration
           </Link>
-          <Link href="/history" className={pathname === '/history' ? 'active' : ''}>
+          <Link href="/history" onClick={() => setMenuOpen(false)} className={pathname === '/history' ? 'active' : ''}>
             <HistoryIcon fontSize="small" /> Transfer History
           </Link>
-          <Link href="/settings" className={pathname === '/settings' ? 'active' : ''}>
+          <Link href="/settings" onClick={() => setMenuOpen(false)} className={pathname === '/settings' ? 'active' : ''}>
             <SettingsOutlinedIcon fontSize="small" /> Settings
           </Link>
         </nav>
-        <div className="notice" style={{ borderTop: 'none', padding: 0 }}>
+        <div className="notice app-session" style={{ borderTop: 'none', padding: 0 }}>
           {session && (
             <button
               className="sign-out-btn"
@@ -59,7 +73,23 @@ export default function AppShell({ children }) {
           )}
         </div>
       </aside>
-      <main>{children}</main>
+      <button type="button" className="app-sidebar-backdrop" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />
+      <button
+        type="button"
+        className="app-menu-toggle"
+        aria-label={menuOpen ? 'Close navigation' : 'Open navigation'}
+        aria-expanded={menuOpen}
+        aria-controls="app-navigation"
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        {menuOpen ? <CloseIcon /> : <MenuIcon />}
+      </button>
+      <div className="app-main-column">
+        <div className="app-mobile-toolbar">
+          <img src="/sebsa-logo.png" alt="SEBSA" className="brand-logo" />
+        </div>
+        <main>{children}</main>
+      </div>
     </div>
   )
 }
